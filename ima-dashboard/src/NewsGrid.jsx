@@ -34,10 +34,13 @@ export function NewsGrid({ feed }) {
               key={item.id}
               style={{ gridRowEnd: `span ${rowSpan}` }}
               whileHover={{ 
+                y: -8,
+                x: index % 2 === 0 ? 3 : -3, // Subtle organic sway
                 scale: 1.015,
                 backgroundColor: 'rgba(255,255,255,0.02)',
                 borderColor: 'rgba(230,0,51,0.2)',
-                boxShadow: '0 0 40px -10px rgba(230,0,51,0.15)'
+                boxShadow: '0 20px 40px -10px rgba(230,0,51,0.15)',
+                transition: { duration: 0.7, ease: [0.16, 1, 0.3, 1] }
               }}
               className="group relative flex flex-col p-6 rounded-3xl bg-white/[0.01] border border-white/5 backdrop-blur-3xl overflow-hidden shadow-2xl transition-all duration-700 ease-out"
             >
