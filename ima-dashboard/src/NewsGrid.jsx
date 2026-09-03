@@ -16,8 +16,9 @@ export function NewsGrid({ feed }) {
     <div className="masonry-grid px-6 max-w-7xl mx-auto pb-24">
       <AnimatePresence>
         {feed.map((item, index) => {
-          // Calculate a random height span for the masonry effect (2 to 4 grid rows)
-          const rowSpan = 15 + Math.floor(Math.random() * 10);
+          // Deterministic height based on index to prevent layout thrashing on re-render
+          const pseudoRandom = (index * 7 + 13) % 10;
+          const rowSpan = 15 + pseudoRandom;
           
           return (
             <motion.div
@@ -33,7 +34,6 @@ export function NewsGrid({ feed }) {
               key={item.id}
               style={{ gridRowEnd: `span ${rowSpan}` }}
               whileHover={{ 
-                y: -5,
                 backgroundColor: 'rgba(255,255,255,0.03)',
                 borderColor: 'rgba(255,255,255,0.15)'
               }}

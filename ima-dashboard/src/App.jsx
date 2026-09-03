@@ -1,43 +1,14 @@
-import React, { useEffect, useState } from 'react';
+import React from 'react';
 import { useLiveFeed } from './hooks/useLiveFeed';
 import { NewsGrid } from './NewsGrid';
+import { CustomCursor } from './CustomCursor';
 
 function App() {
   const { feed, loading, error } = useLiveFeed();
-  const [cursorPos, setCursorPos] = useState({ x: 0, y: 0 });
-  const [hovering, setHovering] = useState(false);
-
-  useEffect(() => {
-    const moveCursor = (e) => {
-      setCursorPos({ x: e.clientX, y: e.clientY });
-    };
-    
-    // Add event listeners to detect hovering over interactive elements
-    const handleMouseOver = (e) => {
-      if (e.target.tagName.toLowerCase() === 'a' || e.target.closest('a')) {
-        setHovering(true);
-      }
-    };
-    
-    const handleMouseOut = () => setHovering(false);
-
-    window.addEventListener('mousemove', moveCursor);
-    document.body.addEventListener('mouseover', handleMouseOver);
-    document.body.addEventListener('mouseout', handleMouseOut);
-
-    return () => {
-      window.removeEventListener('mousemove', moveCursor);
-      document.body.removeEventListener('mouseover', handleMouseOver);
-      document.body.removeEventListener('mouseout', handleMouseOut);
-    };
-  }, []);
 
   return (
     <>
-      <div 
-        className={`custom-cursor hidden md:block ${hovering ? 'hovering' : ''}`} 
-        style={{ left: cursorPos.x, top: cursorPos.y }}
-      />
+      <CustomCursor />
       
       <div className="surreal-bg">
         <div className="blob blob-1" />
