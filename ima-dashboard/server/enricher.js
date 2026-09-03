@@ -92,7 +92,7 @@ export async function enrichBatchWithGemini(articlesArray) {
         try {
             console.log(`Sending API request for article ID: ${article.id}...`);
             const response = await ai.models.generateContent({
-                model: 'gemini-1.5-flash',
+                model: 'gemini-3.6-flash',
                 contents: prompt,
                 config: {
                     responseMimeType: 'application/json',
@@ -132,11 +132,12 @@ export async function enrichBatchWithGemini(articlesArray) {
         if (cachedIds.has(article.id)) {
             return cache.find(c => c.id === article.id);
         } else {
-            // Generate on-the-fly fallback for UI (NOT cached, so it retries next cycle)
+            // Generate on-the-fly fallback for UI using raw RSS data
+            const rawSnippet = article.text ? (article.text.length > 150 ? article.text.substring(0, 150) + '...' : article.text) : "Analyzing neural context...";
             return {
                 id: article.id,
-                tldr: "Summary temporarily unavailable.",
-                whyItMatters: ["Enrichment pending or failed."],
+                tldr: rawSnippet,
+                whyItMatters: [],
                 category: "General",
                 importanceScore: 50,
                 clusterTag: null
