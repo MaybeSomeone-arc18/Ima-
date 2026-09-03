@@ -1,5 +1,6 @@
 @import "tailwindcss";
-@source "../";
+@source "../index.html";
+@source "../src";
 @theme {
   --color-brand: #E60033;
   --color-crimson-500: #E60033;
