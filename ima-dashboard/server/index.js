@@ -76,7 +76,7 @@ Answer the user's questions strictly based on the news, or just be generally hel
     prompt += `User: ${message}\nAI:`;
 
     const response = await ai.models.generateContent({
-        model: 'gemini-1.5-flash',
+        model: 'gemini-3.6-flash',
         contents: prompt
     });
 
