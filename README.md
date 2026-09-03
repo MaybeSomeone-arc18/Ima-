@@ -43,6 +43,7 @@ npm run dev     # Vite dev server on http://localhost:5173
 
 Open `http://localhost:5173`. The frontend talks to `localhost:3001` automatically in dev mode.
 
+
 ## Environment variables
 
 | Variable | Required | Description |
@@ -52,6 +53,7 @@ Open `http://localhost:5173`. The frontend talks to `localhost:3001` automatical
 | `NODE_ENV` | No | Standard Node environment flag. |
 
 **Gemini free-tier note:** the free tier caps out at roughly 20 requests/day per model. If the chat widget replies with "Rate limit reached," that's Google's quota, not a bug — either wait for the daily reset or enable billing on the Google Cloud project behind your key.
+
 
 ## Scripts
 
@@ -63,9 +65,11 @@ Open `http://localhost:5173`. The frontend talks to `localhost:3001` automatical
 | `npm run start` | Start the Express backend |
 | `npm run lint` | Run oxlint |
 
+
 ## Deployment
 
 The frontend expects a deployed backend at `https://ima-9ay9.onrender.com` in production (see the `baseUrl` logic in `ChatBot.jsx` and `useLiveFeed.js`). If you deploy your own backend elsewhere, update those URLs or wire them through `VITE_API_URL`. The backend is a plain Express app — any Node host (Render, Railway, Fly.io, etc.) works; just set `GEMINI_API_KEY` in that host's environment settings.
+
 
 ## Known limitations
 
