@@ -8,7 +8,8 @@ export function useLiveFeed() {
   useEffect(() => {
     async function fetchFeed() {
       try {
-        const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3001/api/feed';
+        const baseUrl = import.meta.env.DEV ? 'http://localhost:3001' : 'https://ima-9ay9.onrender.com';
+        const apiUrl = import.meta.env.VITE_API_URL || `${baseUrl}/api/feed`;
         const response = await fetch(apiUrl);
         if (!response.ok) {
           throw new Error('Failed to fetch feed');
