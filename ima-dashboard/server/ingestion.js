@@ -28,6 +28,57 @@ function generateHash(url, title) {
   return crypto.createHash('sha256').update(url + title).digest('hex');
 }
 
+// Most feeds (Hacker News, TechCrunch) don't embed images in the RSS payload,
+// so real cover images have to be scraped from the article page itself.
+// Cached in-memory per URL so we don't re-fetch the same article every ingestion cycle.
+const ogImageCache = new Map();
+
+async function fetchOgImage(url) {
+  if (ogImageCache.has(url)) return ogImageCache.get(url);
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 6000);
+
+  try {
+    const response = await fetch(url, {
+      signal: controller.signal,
+      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; ImaBot/1.0)' }
+    });
+    clearTimeout(timeoutId);
+
+    const html = await response.text();
+    const doc = new JSDOM(html, { url });
+    const meta =
+      doc.window.document.querySelector('meta[property="og:image"]') ||
+      doc.window.document.querySelector('meta[name="twitter:image"]');
+    const rawImageUrl = meta ? meta.getAttribute('content') : null;
+    // og:image should be absolute per spec, but not every site complies -
+    // resolve against the article URL so relative paths don't 404 client-side.
+    const imageUrl = rawImageUrl ? new URL(rawImageUrl, url).href : null;
+
+    ogImageCache.set(url, imageUrl);
+    return imageUrl;
+  } catch {
+    clearTimeout(timeoutId);
+    ogImageCache.set(url, null);
+    return null;
+  }
+}
+
+async function fillMissingImages(stories, concurrency = 8) {
+  const needsImage = stories.filter(s => s.url && !s.imageUrl);
+  let cursor = 0;
+
+  async function worker() {
+    while (cursor < needsImage.length) {
+      const story = needsImage[cursor++];
+      story.imageUrl = await fetchOgImage(story.url);
+    }
+  }
+
+  await Promise.all(Array.from({ length: concurrency }, worker));
+}
+
 export async function extractFullText(url) {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
@@ -89,6 +140,8 @@ export async function fetchAndNormalizeFeeds() {
 
   // Deduplicate based on ID
   const uniqueStories = Array.from(new Map(allStories.map(s => [s.id, s])).values());
-  
+
+  await fillMissingImages(uniqueStories);
+
   return uniqueStories;
 }
