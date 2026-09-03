@@ -71,7 +71,6 @@ async function updateFeed() {
         return new Date(b.pubDate).getTime() - new Date(a.pubDate).getTime();
       });
       
-      currentFeed = feedArray;
       console.log(`Feed update complete. Current feed size: ${currentFeed.length}`);
       
       // Write to KAISEN integration directory

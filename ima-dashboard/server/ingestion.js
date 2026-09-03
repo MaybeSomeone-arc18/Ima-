@@ -6,7 +6,9 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
-const parser = new Parser();
+const parser = new Parser({
+  timeout: 5000 // 5 second timeout so a dead RSS feed doesn't freeze the server
+});
 const { JSDOM } = jsdom;
 
 const feeds = [
