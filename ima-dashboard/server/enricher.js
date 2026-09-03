@@ -61,37 +61,72 @@ export async function enrichBatchWithGemini(articlesArray) {
         const requestedIds = new Set(articlesArray.map(a => a.id));
         return cache.filter(a => requestedIds.has(a.id));
     }
+    const MAX_BATCH_SIZE = 3;
+    const batchToProcess = uncachedArticles.slice(0, MAX_BATCH_SIZE);
     
-    console.log(`Enriching ${uncachedArticles.length} new articles...`);
+    console.log(`Enriching ${batchToProcess.length} new articles (out of ${uncachedArticles.length} uncached)...`);
     
-    const prompt = `
-        Please analyze the following articles and provide structured enrichment data for each.
-        You must return a JSON array containing an object for each article provided, matching the provided schema.
-        
-        Articles:
-        ${JSON.stringify(uncachedArticles, null, 2)}
-    `;
+    const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+    let enrichedData = [];
 
-    try {
-        const response = await ai.models.generateContent({
-            model: 'gemini-3.6-flash',
-            contents: prompt,
-            config: {
-                responseMimeType: 'application/json',
-                responseSchema: responseSchema,
-                temperature: 0.1,
+    for (const article of batchToProcess) {
+        const prompt = `
+            Please analyze the following article and provide structured enrichment data.
+            You must return a JSON array containing an object for the article provided, strictly matching the provided schema.
+            Example JSON Output: [{ "id": "...", "tldr": "...", "whyItMatters": ["..."], "category": "AI", "importanceScore": 85, "clusterTag": "..." }]
+            
+            Article:
+            ${JSON.stringify(article, null, 2)}
+        `;
+
+        try {
+            console.log(`Sending API request for article ID: ${article.id}...`);
+            const response = await ai.models.generateContent({
+                model: 'gemini-3.6-flash',
+                contents: prompt,
+                config: {
+                    responseMimeType: 'application/json',
+                    responseSchema: responseSchema,
+                    temperature: 0.1,
+                }
+            });
+            
+            try {
+                const parsed = JSON.parse(response.text);
+                enrichedData = enrichedData.concat(parsed);
+                // Save incrementally
+                await writeCache(parsed);
+            } catch (parseError) {
+                console.error("Failed to parse JSON from Gemini for article:", article.id);
             }
-        });
+        } catch (error) {
+            console.error(`Error during API call for article ${article.id}:`, error.message);
+        }
         
-        const enrichedData = JSON.parse(response.text);
-        
-        await writeCache(enrichedData);
-        
-        const cache = await readCache();
-        const requestedIds = new Set(articlesArray.map(a => a.id));
-        return cache.filter(a => requestedIds.has(a.id));
-    } catch (error) {
-        console.error("Error during enrichment:", error);
-        throw error;
+        // Anti-rate-limit sleep (2 seconds)
+        await sleep(2000);
     }
+    
+    // Always return a complete list for the requested articles: 
+    // Data from cache, or on-the-fly fallback data for uncached items
+    const cache = await readCache();
+    const cachedIds = new Set(cache.map(c => c.id));
+    
+    const finalData = articlesArray.map(article => {
+        if (cachedIds.has(article.id)) {
+            return cache.find(c => c.id === article.id);
+        } else {
+            // Generate on-the-fly fallback for UI (NOT cached, so it retries next cycle)
+            return {
+                id: article.id,
+                tldr: "Summary temporarily unavailable.",
+                whyItMatters: ["Enrichment pending or failed."],
+                category: "General",
+                importanceScore: 50,
+                clusterTag: null
+            };
+        }
+    });
+    
+    return finalData;
 }
