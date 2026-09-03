@@ -1,5 +1,6 @@
 import { GoogleGenAI, Type } from '@google/genai';
 import { readCache, writeCache, getUncachedItems } from './cache.js';
+import { extractFullText } from './ingestion.js';
 import dotenv from 'dotenv';
 
 dotenv.config();
@@ -70,6 +71,15 @@ export async function enrichBatchWithGemini(articlesArray) {
     let enrichedData = [];
 
     for (const article of batchToProcess) {
+        // Asynchronously fetch full HTML only when it's about to be processed
+        if (article.text.length < 250) {
+            console.log(`Extracting full text for ${article.id}...`);
+            const extractedText = await extractFullText(article.url);
+            if (extractedText) {
+                article.text = extractedText;
+            }
+        }
+
         const prompt = `
             Please analyze the following article and provide structured enrichment data.
             You must return a JSON array containing an object for the article provided, strictly matching the provided schema.

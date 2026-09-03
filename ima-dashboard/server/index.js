@@ -28,27 +28,29 @@ try {
 async function updateFeed() {
   console.log('Starting feed update cycle...');
   try {
-    // 1. Fetch raw stories
+    // 1. Ingest raw stories (Fast RSS Pass)
     const rawStories = await fetchAndNormalizeFeeds();
     
-    // Sort raw stories initially
-    currentFeed = [...rawStories].sort((a, b) => new Date(b.pubDate).getTime() - new Date(a.pubDate).getTime());
-    console.log(`Fetched ${rawStories.length} raw stories.`);
-    
-    // 2. Enrich stories
+    // Immediately populate currentFeed if it's empty or outdated so frontend renders instantly
+    if (currentFeed.length === 0) {
+      currentFeed = rawStories;
+      console.log(`Instant Boot: Populated ${currentFeed.length} raw stories.`);
+    }
+
     try {
-      const enrichedData = await enrichBatchWithGemini(rawStories);
+      // 2. Enrich stories (Slow Background AI Pass)
+      const enrichedStories = await enrichBatchWithGemini(rawStories);
       
       // 3. Merge raw and enriched data
       const mergedMap = new Map();
       
-      // First populate with raw stories
-      for (const story of rawStories) {
-        mergedMap.set(story.id, { ...story });
+      // First, add all raw stories
+      for (const raw of rawStories) {
+        mergedMap.set(raw.id, raw);
       }
       
-      // Then merge in enrichment data
-      for (const enriched of enrichedData) {
+      // Then, overwrite with enriched data where available
+      for (const enriched of enrichedStories) {
         if (mergedMap.has(enriched.id)) {
           mergedMap.set(enriched.id, { ...mergedMap.get(enriched.id), ...enriched });
         } else {
@@ -56,9 +58,11 @@ async function updateFeed() {
         }
       }
       
-      // Convert to array and sort by importanceScore (if available) then pubDate
-      const feedArray = Array.from(mergedMap.values());
-      feedArray.sort((a, b) => {
+      const mergedArray = Array.from(mergedMap.values());
+      
+      // Update the in-memory feed with fully enriched data
+      currentFeed = mergedArray;
+      currentFeed.sort((a, b) => {
         const scoreA = a.importanceScore || 0;
         const scoreB = b.importanceScore || 0;
         if (scoreA !== scoreB) {

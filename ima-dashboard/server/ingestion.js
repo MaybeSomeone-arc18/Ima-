@@ -20,15 +20,21 @@ function generateHash(url, title) {
   return crypto.createHash('sha256').update(url + title).digest('hex');
 }
 
-async function extractFullText(url) {
+export async function extractFullText(url) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+
   try {
-    const response = await fetch(url);
+    const response = await fetch(url, { signal: controller.signal });
+    clearTimeout(timeoutId);
+    
     const html = await response.text();
     const doc = new JSDOM(html, { url });
     const reader = new Readability(doc.window.document);
     const article = reader.parse();
     return article ? article.textContent : '';
   } catch (error) {
+    clearTimeout(timeoutId);
     console.error(`Failed to extract text from ${url}:`, error.message);
     return '';
   }
@@ -47,20 +53,11 @@ export async function fetchAndNormalizeFeeds() {
         const rawText = item.contentSnippet || item.content || '';
         const id = generateHash(url, title);
         
-        let fullText = rawText;
-        
-        if (rawText.length < 250) {
-          const extractedText = await extractFullText(url);
-          if (extractedText) {
-            fullText = extractedText;
-          }
-        }
-        
         allStories.push({
           id,
           title,
           url,
-          text: fullText.trim(),
+          text: rawText.trim(),
           source: feed.title || feedUrl,
           pubDate: item.pubDate || new Date().toISOString()
         });
