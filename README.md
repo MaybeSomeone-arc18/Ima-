@@ -2,6 +2,7 @@
 
 A dark, glassmorphic news dashboard that aggregates Hacker News, TechCrunch, Stratechery, and the GitHub Changelog into one live feed, with a Gemini-powered chat assistant that can answer questions about what's currently in the feed.
 
+
 ## Features
 
 - **Live aggregated feed** — pulls and normalizes multiple RSS/Atom feeds every 5 minutes, deduplicated by content hash
