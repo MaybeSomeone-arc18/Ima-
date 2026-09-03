@@ -74,29 +74,35 @@ export function NewsGrid({ feed }) {
               {/* Additional dark fade to ensure text readability */}
               <div className="absolute inset-0 bg-gradient-to-t from-[#050505]/90 via-[#050505]/40 to-transparent pointer-events-none" />
               
-              <div className="flex justify-between items-start mb-6">
-                <span className="text-[10px] tracking-widest text-white/30 uppercase">
+              <div className="flex justify-between items-start mb-6 relative z-10">
+                <span className="text-[10px] tracking-widest text-white/50 uppercase font-medium">
                   {item.source}
                 </span>
                 
-                <div className="flex items-center space-x-2">
-                  <span className={`w-1.5 h-1.5 rounded-full ${item.importanceScore > 80 ? 'bg-crimson-500 shadow-[0_0_8px_#E60033]' : 'bg-white/20'}`} />
-                  <span className="text-[10px] font-mono text-white/30">
-                    {item.importanceScore || '—'}
+                <div className="flex items-center gap-2">
+                  <div className={`w-1.5 h-1.5 rounded-full ${item.importanceScore > 85 ? 'bg-[#E60033] shadow-[0_0_8px_#E60033]' : 'bg-white/30'}`} />
+                  <span className="text-xs font-mono text-white/50">
+                    {item.importanceScore || '...'}
                   </span>
                 </div>
               </div>
 
-              <h3 className="text-white/90 text-xl md:text-2xl font-medium tracking-tight leading-snug mb-4">
-                <a href={item.url} target="_blank" rel="noreferrer" className="hover:text-white transition-colors duration-300">
+              <h3 className="text-white text-xl md:text-2xl font-bold tracking-tight leading-snug mb-4 relative z-10">
+                <a href={item.url} target="_blank" rel="noreferrer" className="hover:text-[#E60033] transition-colors duration-300">
                   {item.title}
                 </a>
               </h3>
-              
-              {item.tldr && (
-                <p className="text-sm text-white/50 leading-relaxed font-light mt-auto">
-                  {item.tldr}
-                </p>
+
+              <p className="text-sm text-white/80 leading-relaxed font-light mt-auto relative z-10">
+                {item.tldr || 'Summary temporarily unavailable.'}
+              </p>
+
+              {item.category && (
+                <div className="mt-6 pt-4 border-t border-white/10 relative z-10">
+                  <span className="text-[9px] font-mono tracking-widest text-[#E60033] uppercase">
+                    {item.category}
+                  </span>
+                </div>
               )}
             </motion.div>
           );

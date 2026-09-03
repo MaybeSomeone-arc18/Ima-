@@ -92,10 +92,16 @@ export async function enrichBatchWithGemini(articlesArray) {
             });
             
             try {
-                const parsed = JSON.parse(response.text);
-                enrichedData = enrichedData.concat(parsed);
+                const parsedArray = JSON.parse(response.text);
+                
+                // Merge the AI data with the original raw article data so the cache has titles/URLs
+                const fullEnrichedData = parsedArray.map(parsedItem => {
+                    return { ...article, ...parsedItem };
+                });
+                
+                enrichedData = enrichedData.concat(fullEnrichedData);
                 // Save incrementally
-                await writeCache(parsed);
+                await writeCache(fullEnrichedData);
             } catch (parseError) {
                 console.error("Failed to parse JSON from Gemini for article:", article.id);
             }
