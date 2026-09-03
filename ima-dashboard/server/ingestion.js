@@ -7,7 +7,13 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 const parser = new Parser({
-  timeout: 5000 // 5 second timeout so a dead RSS feed doesn't freeze the server
+  timeout: 5000, // 5 second timeout so a dead RSS feed doesn't freeze the server
+  customFields: {
+    item: [
+      ['media:content', 'mediaContent', { keepArray: true }],
+      ['content:encoded', 'contentEncoded']
+    ]
+  }
 });
 const { JSDOM } = jsdom;
 
@@ -58,8 +64,11 @@ export async function fetchAndNormalizeFeeds() {
         let imageUrl = null;
         if (item.enclosure && item.enclosure.url) {
           imageUrl = item.enclosure.url;
-        } else if (item.content) {
-          const imgMatch = item.content.match(/<img[^>]+src="([^">]+)"/);
+        } else if (item.mediaContent && item.mediaContent.length > 0 && item.mediaContent[0].$) {
+          imageUrl = item.mediaContent[0].$.url;
+        } else {
+          const htmlContent = item.contentEncoded || item.content || item.contentSnippet || '';
+          const imgMatch = htmlContent.match(/<img[^>]+src=["']([^"']+)["']/i);
           if (imgMatch) imageUrl = imgMatch[1];
         }
         
