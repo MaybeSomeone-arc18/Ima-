@@ -8,7 +8,8 @@ export function useLiveFeed() {
   useEffect(() => {
     async function fetchFeed() {
       try {
-        const response = await fetch('http://localhost:3001/api/feed');
+        const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3001/api/feed';
+        const response = await fetch(apiUrl);
         if (!response.ok) {
           throw new Error('Failed to fetch feed');
         }
