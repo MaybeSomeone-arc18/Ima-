@@ -1,7 +1,8 @@
-import React from 'react';
-import { useLiveFeed } from './hooks/useLiveFeed';
+import React, { useState, useEffect } from 'react';
 import { NewsGrid } from './NewsGrid';
 import { CustomCursor } from './CustomCursor';
+import ChatBot from './ChatBot';
+import { useLiveFeed } from './hooks/useLiveFeed';
 
 function App() {
   const { feed, loading, error } = useLiveFeed();
@@ -49,6 +50,8 @@ function App() {
           <NewsGrid feed={feed} />
         </main>
       </div>
+
+      <ChatBot />
     </>
   );
 }

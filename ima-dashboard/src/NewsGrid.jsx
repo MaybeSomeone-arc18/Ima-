@@ -101,19 +101,23 @@ export function NewsGrid({ feed }) {
                 </a>
               </h3>
 
-              {item.imageUrl && (
-                <div className="relative z-10 mb-4 w-full h-40 overflow-hidden rounded-2xl border border-white/10 group-hover:border-white/20 transition-colors">
-                  <img 
-                    src={item.imageUrl} 
-                    alt={item.title} 
-                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700 ease-out"
-                    onError={(e) => { e.target.style.display = 'none'; }}
-                  />
-                </div>
-              )}
+              <div className="relative z-10 mb-4 w-full h-40 overflow-hidden rounded-2xl border border-white/10 group-hover:border-white/20 transition-colors">
+                <img 
+                  src={item.imageUrl || '/default-card-img.png'} 
+                  alt={item.title || "News cover"} 
+                  className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700 ease-out"
+                  onError={(e) => { 
+                    if (!e.target.src.endsWith('/default-card-img.png')) {
+                      e.target.src = '/default-card-img.png';
+                    } else {
+                      e.target.style.display = 'none';
+                    }
+                  }}
+                />
+              </div>
 
               <p className="text-sm text-white/80 leading-relaxed font-light mt-auto relative z-10">
-                {item.tldr || 'Summary temporarily unavailable.'}
+                {item.text && item.text.length > 150 ? item.text.substring(0, 150) + '...' : item.text}
               </p>
 
               {item.category && (
