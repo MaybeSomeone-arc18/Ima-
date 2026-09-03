@@ -39,13 +39,13 @@ export default function ChatBot() {
         })
       });
 
-      if (!response.ok) throw new Error('Network response was not ok');
       const data = await response.json();
-      
+      if (!response.ok) throw new Error(data.error || 'Network response was not ok');
+
       setMessages(prev => [...prev, { role: 'assistant', content: data.response }]);
     } catch (error) {
       console.error('Chat error:', error);
-      setMessages(prev => [...prev, { role: 'assistant', content: 'Connection lost. Neural link unstable.' }]);
+      setMessages(prev => [...prev, { role: 'assistant', content: error.message || 'Connection lost. Neural link unstable.' }]);
     } finally {
       setIsLoading(false);
     }
@@ -141,7 +141,7 @@ export default function ChatBot() {
         )}
       </AnimatePresence>
 
-      <style jsx global>{`
+      <style>{`
         .custom-scrollbar::-webkit-scrollbar {
           width: 4px;
         }

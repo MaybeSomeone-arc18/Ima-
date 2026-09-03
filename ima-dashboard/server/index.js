@@ -83,6 +83,12 @@ Answer the user's questions strictly based on the news, or just be generally hel
     res.json({ response: response.text });
   } catch (error) {
     console.error("Chat API error:", error);
+    if (error.status === 429) {
+      return res.status(429).json({ error: "Rate limit reached on the Gemini API free tier. Please wait a bit and try again." });
+    }
+    if (error.status === 401 || error.status === 403) {
+      return res.status(error.status).json({ error: "Gemini API key was rejected. Check GEMINI_API_KEY." });
+    }
     res.status(500).json({ error: "Failed to communicate with Neural Link." });
   }
 });
