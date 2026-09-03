@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { MessageSquare, X, Send, Bot, User } from 'lucide-react';
+import { getApiBaseUrl } from './lib/api';
 
 export default function ChatBot() {
   const [isOpen, setIsOpen] = useState(false);
@@ -29,8 +30,7 @@ export default function ChatBot() {
     setIsLoading(true);
 
     try {
-      const baseUrl = import.meta.env.DEV ? 'http://localhost:3001' : 'https://ima-9ay9.onrender.com';
-      const response = await fetch(`${baseUrl}/api/chat`, {
+      const response = await fetch(`${getApiBaseUrl()}/api/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

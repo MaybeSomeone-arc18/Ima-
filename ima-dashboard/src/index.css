@@ -91,12 +91,20 @@ body {
   100% { transform: translate(0, 0) scale(1); }
 }
 
-/* Masonry Layout Tweaks */
+/* Masonry Layout: real CSS columns so each card is sized to its own content
+   instead of a fixed grid row-span, which left dead space when a card's
+   actual content didn't match its guessed height. */
 .masonry-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-  grid-auto-rows: 20px;
-  gap: 1.5rem;
+  columns: 1;
+  column-gap: 1.5rem;
+}
+
+@media (min-width: 640px) {
+  .masonry-grid { columns: 2; }
+}
+
+@media (min-width: 1024px) {
+  .masonry-grid { columns: 3; }
 }
 
 /* Hide scrollbar but keep functionality */

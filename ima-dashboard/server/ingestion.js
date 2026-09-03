@@ -31,7 +31,17 @@ function generateHash(url, title) {
 // Most feeds (Hacker News, TechCrunch) don't embed images in the RSS payload,
 // so real cover images have to be scraped from the article page itself.
 // Cached in-memory per URL so we don't re-fetch the same article every ingestion cycle.
+// Bounded with FIFO eviction - an unbounded Map here is exactly the kind of slow
+// leak that adds up over days of uptime on a memory-constrained instance.
+const OG_CACHE_MAX = 500;
 const ogImageCache = new Map();
+
+function cacheOgImage(url, imageUrl) {
+  if (ogImageCache.size >= OG_CACHE_MAX) {
+    ogImageCache.delete(ogImageCache.keys().next().value);
+  }
+  ogImageCache.set(url, imageUrl);
+}
 
 async function fetchOgImage(url) {
   if (ogImageCache.has(url)) return ogImageCache.get(url);
@@ -44,28 +54,41 @@ async function fetchOgImage(url) {
       signal: controller.signal,
       headers: { 'User-Agent': 'Mozilla/5.0 (compatible; ImaBot/1.0)' }
     });
+
+    // og:image always lives in <head>, so parsing the full page into a JSDOM
+    // tree (which can be megabytes per article, times dozens of articles,
+    // times a worker pool, every 5 minutes) is unnecessary memory pressure.
+    // Stream just enough of the response and regex-match the meta tag instead.
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let html = '';
+    while (html.length < 65536 && !html.includes('</head>')) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      html += decoder.decode(value, { stream: true });
+    }
+    reader.cancel().catch(() => {});
     clearTimeout(timeoutId);
 
-    const html = await response.text();
-    const doc = new JSDOM(html, { url });
-    const meta =
-      doc.window.document.querySelector('meta[property="og:image"]') ||
-      doc.window.document.querySelector('meta[name="twitter:image"]');
-    const rawImageUrl = meta ? meta.getAttribute('content') : null;
+    const match =
+      html.match(/<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i) ||
+      html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image["']/i) ||
+      html.match(/<meta[^>]+name=["']twitter:image["'][^>]+content=["']([^"']+)["']/i);
+
     // og:image should be absolute per spec, but not every site complies -
     // resolve against the article URL so relative paths don't 404 client-side.
-    const imageUrl = rawImageUrl ? new URL(rawImageUrl, url).href : null;
+    const imageUrl = match ? new URL(match[1], url).href : null;
 
-    ogImageCache.set(url, imageUrl);
+    cacheOgImage(url, imageUrl);
     return imageUrl;
   } catch {
     clearTimeout(timeoutId);
-    ogImageCache.set(url, null);
+    cacheOgImage(url, null);
     return null;
   }
 }
 
-async function fillMissingImages(stories, concurrency = 8) {
+async function fillMissingImages(stories, concurrency = 5) {
   const needsImage = stories.filter(s => s.url && !s.imageUrl);
   let cursor = 0;
 
