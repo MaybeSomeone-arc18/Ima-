@@ -77,6 +77,11 @@ app.get('/api/feed', (req, res) => {
   res.json(currentFeed);
 });
 
+// Root endpoint for health checks
+app.get('/', (req, res) => {
+  res.send('Ima Backend is running. Use /api/feed to get the latest news.');
+});
+
 app.listen(PORT, () => {
   console.log(`Server listening on port ${PORT}`);
   
