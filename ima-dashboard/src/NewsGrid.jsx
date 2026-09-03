@@ -66,13 +66,21 @@ export function NewsGrid({ feed }) {
               }}
               className="group relative flex flex-col p-6 rounded-3xl bg-white/[0.01] border border-white/5 backdrop-blur-3xl overflow-hidden shadow-2xl transition-all duration-700 ease-out"
             >
+              {/* Blog Image Layer */}
+              {item.imageUrl && (
+                <div 
+                  className="absolute inset-0 bg-cover bg-center opacity-30 mix-blend-luminosity group-hover:opacity-50 transition-opacity duration-700 pointer-events-none"
+                  style={{ backgroundImage: `url(${item.imageUrl})` }}
+                />
+              )}
+
               {/* Surrealistic Unique Mesh Gradient Background */}
               <div 
                 className="absolute inset-0 pointer-events-none group-hover:opacity-80 transition-opacity duration-1000 opacity-40 mix-blend-screen blur-xl"
                 style={{ backgroundImage: generateMeshGradient(item.id) }} 
               />
               {/* Additional dark fade to ensure text readability */}
-              <div className="absolute inset-0 bg-gradient-to-t from-[#050505]/90 via-[#050505]/40 to-transparent pointer-events-none" />
+              <div className="absolute inset-0 bg-gradient-to-t from-[#050505]/95 via-[#050505]/60 to-transparent pointer-events-none" />
               
               <div className="flex justify-between items-start mb-6 relative z-10">
                 <span className="text-[10px] tracking-widest text-white/50 uppercase font-medium">

@@ -55,10 +55,19 @@ export async function fetchAndNormalizeFeeds() {
         const rawText = item.contentSnippet || item.content || '';
         const id = generateHash(url, title);
         
+        let imageUrl = null;
+        if (item.enclosure && item.enclosure.url) {
+          imageUrl = item.enclosure.url;
+        } else if (item.content) {
+          const imgMatch = item.content.match(/<img[^>]+src="([^">]+)"/);
+          if (imgMatch) imageUrl = imgMatch[1];
+        }
+        
         allStories.push({
           id,
           title,
           url,
+          imageUrl,
           text: rawText.trim(),
           source: feed.title || feedUrl,
           pubDate: item.pubDate || new Date().toISOString()
