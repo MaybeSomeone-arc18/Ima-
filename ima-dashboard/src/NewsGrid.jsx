@@ -1,6 +1,28 @@
 import React from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 
+function generateMeshGradient(id) {
+  // Simple deterministic hash for consistent colors per article
+  let hash = 0;
+  for (let i = 0; i < (id || '').length; i++) {
+    hash = (id.charCodeAt(i) + ((hash << 5) - hash)) | 0;
+  }
+  
+  // Generate 4 related hues based on the hash
+  const hue1 = Math.abs(hash % 360);
+  const hue2 = (hue1 + 60) % 360;
+  const hue3 = (hue1 + 120) % 360;
+  const hue4 = (hue1 + 180) % 360;
+  
+  // Return a complex, highly blurred radial mesh gradient
+  return `
+    radial-gradient(at 0% 0%, hsla(${hue1}, 80%, 60%, 0.15) 0px, transparent 60%),
+    radial-gradient(at 100% 0%, hsla(${hue2}, 80%, 60%, 0.15) 0px, transparent 60%),
+    radial-gradient(at 0% 100%, hsla(${hue3}, 80%, 60%, 0.15) 0px, transparent 60%),
+    radial-gradient(at 100% 100%, hsla(${hue4}, 80%, 60%, 0.15) 0px, transparent 60%)
+  `;
+}
+
 export function NewsGrid({ feed }) {
   if (!feed || feed.length === 0) {
     return (
@@ -44,7 +66,13 @@ export function NewsGrid({ feed }) {
               }}
               className="group relative flex flex-col p-6 rounded-3xl bg-white/[0.01] border border-white/5 backdrop-blur-3xl overflow-hidden shadow-2xl transition-all duration-700 ease-out"
             >
-              <div className="absolute inset-0 bg-gradient-to-b from-white/[0.03] to-transparent pointer-events-none group-hover:opacity-50 transition-opacity duration-1000" />
+              {/* Surrealistic Unique Mesh Gradient Background */}
+              <div 
+                className="absolute inset-0 pointer-events-none group-hover:opacity-80 transition-opacity duration-1000 opacity-40 mix-blend-screen blur-xl"
+                style={{ backgroundImage: generateMeshGradient(item.id) }} 
+              />
+              {/* Additional dark fade to ensure text readability */}
+              <div className="absolute inset-0 bg-gradient-to-t from-[#050505]/90 via-[#050505]/40 to-transparent pointer-events-none" />
               
               <div className="flex justify-between items-start mb-6">
                 <span className="text-[10px] tracking-widest text-white/30 uppercase">

@@ -15,6 +15,16 @@ app.use(express.json());
 // In-memory store for the feed
 let currentFeed = [];
 
+// Preload cache instantly on startup
+try {
+  const cachePath = path.join(process.cwd(), 'server', 'data', 'cache.json');
+  const cacheData = await fs.readFile(cachePath, 'utf8');
+  currentFeed = JSON.parse(cacheData);
+  console.log(`Successfully preloaded ${currentFeed.length} articles from cache on boot.`);
+} catch (error) {
+  console.log('No existing cache found or failed to read on boot. Starting fresh.');
+}
+
 async function updateFeed() {
   console.log('Starting feed update cycle...');
   try {
@@ -70,6 +80,9 @@ async function updateFeed() {
     }
   } catch (error) {
     console.error('Error fetching raw stories:', error);
+  } finally {
+    // Schedule the next cycle recursively after 60 seconds (prevents overlapping)
+    setTimeout(updateFeed, 60000);
   }
 }
 
@@ -87,7 +100,4 @@ app.listen(PORT, () => {
   
   // Trigger initial feed ingestion and enrichment
   updateFeed();
-  
-  // Repeat every 60 seconds
-  setInterval(updateFeed, 60000);
 });
