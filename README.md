@@ -13,8 +13,10 @@ A dark, glassmorphic news dashboard that aggregates Hacker News, TechCrunch, Str
 - **Read aloud** — every card and every AI summary can be read aloud via the browser's built-in text-to-speech (Web Speech API)
 - **Bookmarks** — save articles for later; persisted in `localStorage` with the full article data, so saved items survive the feed's 5-minute rotation
 - **Search, source and category filters, and a command palette** — filter by keyword, source, or AI-assigned category, or hit `Cmd/Ctrl+K` for a quick-search overlay
+- **Keyboard navigation** — `j`/`k` move focus between cards, `Enter` opens the focused story, `s` bookmarks it, `/` jumps to search — all disabled while any text field has focus so they never hijack typing
 - **Story clustering** — same-story coverage from different sources (e.g. three outlets on one Tesla story) collapses into one card with a "+N more sources" expander, computed purely by title similarity server-side — no AI cost
 - **Trending badge** — link clicks are tracked per article; anything past a threshold gets a 🔥 badge
+- **Feed stats** — a stats panel (bar chart icon in the header) shows top-clicked stories, category and source breakdowns, and cluster counts, computed on the fly from the live feed with no extra DB round-trip
 - **Installable PWA** — has a manifest, icons, and a conservative service worker (API calls always hit the network; only hashed build assets are cached)
 - **Responsive, animated UI** — React 19 + Tailwind v4 + Framer Motion, built mobile-first
 
@@ -27,18 +29,16 @@ ima-dashboard/
 │   ├── NewsGrid.jsx            # Masonry card grid, per-card summary + read-aloud + bookmark
 │   ├── ChatBot.jsx             # Floating AI chat widget
 │   ├── CommandPalette.jsx      # Cmd/Ctrl+K quick search overlay
+│   ├── StatsPanel.jsx           # Feed stats panel (top clicked, category/source breakdown)
 │   ├── lib/api.js              # Shared API base URL resolution
 │   └── hooks/
 │       ├── useLiveFeed.js      # Polls /api/feed
 │       └── useBookmarks.js     # localStorage-backed bookmarks
-├── server/                    # Express backend
-│   ├── index.js                # API routes (/api/feed, /api/chat, /api/summarize, /api/track-click) + ingestion scheduler
-│   ├── ingestion.js             # RSS fetching, dedup, og:image scraping
-│   ├── clustering.js            # Same-story detection across sources (title token overlap, no AI)
-│   ├── db.js                    # Supabase persistence: load/upsert articles, get/save summaries, click tracking
-│   ├── enricher.js              # Superseded by the summary+category call in index.js; not wired in
-│   └── cache.js                 # Disk cache used by enricher.js
-└── kaisen-bridge/              # Standalone helper script for an external tool integration
+└── server/                    # Express backend
+    ├── index.js                # API routes (/api/feed, /api/stats, /api/chat, /api/summarize, /api/track-click) + ingestion scheduler
+    ├── ingestion.js             # RSS fetching, dedup, og:image scraping, HTML entity decoding
+    ├── clustering.js            # Same-story detection across sources (title token overlap, no AI)
+    └── db.js                    # Supabase persistence: load/upsert articles, get/save summaries, click tracking
 ```
 
 ## Getting started
@@ -127,7 +127,7 @@ The frontend expects a deployed backend at `https://ima-9ay9.onrender.com` in pr
 
 ## Known limitations
 
-- `server/enricher.js` (superseded, see above) and `kaisen-bridge/ima-skill.js` (an external integration helper) exist in the codebase but aren't called from the running app.
 - Image scraping is best-effort: sites that block scraping or omit Open Graph tags fall back to a stylized placeholder card.
 - Click counts (and therefore the trending badge) update in the served feed once per ingestion cycle (~5 min), not in real time - `/api/track-click` writes straight to Supabase, but `currentFeed` only re-syncs from there on the next cycle.
 - Articles summarized before the category feature shipped won't retroactively get a category - it only backfills as the feed rotates and they're replaced by newly-summarized stories.
+- After a Gemini 429, auto-summarization backs off for 15 minutes (doubling on repeated hits, up to 4 hours) rather than retrying every 5-minute ingestion cycle - see `server/index.js`'s quota backoff. That backoff is in-memory only, so it resets on a server restart.

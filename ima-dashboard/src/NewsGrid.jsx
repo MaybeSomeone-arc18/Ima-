@@ -1,11 +1,11 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Radio, ExternalLink, Volume2, Square, Sparkles, X, Bookmark, Flame, Layers } from 'lucide-react';
 import { getApiBaseUrl } from './lib/api';
 
 const TRENDING_THRESHOLD = 3;
 
-function trackClick(id) {
+export function trackClick(id) {
   if (!id) return;
   try {
     const url = `${getApiBaseUrl()}/api/track-click`;
@@ -112,7 +112,7 @@ function SummaryFlyout({ state, isSpeaking, onSpeak, onClose }) {
   );
 }
 
-function NewsCard({ item, index, isSpeaking, onToggleSpeak, isSummaryOpen, summaryState, isSummarySpeaking, onToggleSummary, onSpeakSummary, isBookmarked, onToggleBookmark }) {
+function NewsCard({ item, index, isSpeaking, onToggleSpeak, isSummaryOpen, summaryState, isSummarySpeaking, onToggleSummary, onSpeakSummary, isBookmarked, onToggleBookmark, isFocused, cardRef }) {
   const [imageFailed, setImageFailed] = useState(false);
   const [showRelated, setShowRelated] = useState(false);
   const hues = generateMeshGradient(item.id);
@@ -131,6 +131,7 @@ function NewsCard({ item, index, isSpeaking, onToggleSpeak, isSummaryOpen, summa
       className="mb-6 break-inside-avoid"
     >
       <motion.div
+        ref={cardRef}
         whileHover={{
           y: -8,
           scale: 1.015,
@@ -139,7 +140,9 @@ function NewsCard({ item, index, isSpeaking, onToggleSpeak, isSummaryOpen, summa
           boxShadow: '0 20px 45px -10px rgba(230,0,51,0.18)',
           transition: { duration: 0.5, ease: [0.16, 1, 0.3, 1] }
         }}
-        className={`group relative flex flex-col p-6 rounded-3xl bg-white/[0.02] border backdrop-blur-2xl overflow-hidden shadow-xl transition-colors duration-500 ${isSpeaking ? 'border-[#E60033]/40' : 'border-white/10'}`}
+        className={`group relative flex flex-col p-6 rounded-3xl bg-white/[0.02] border backdrop-blur-2xl overflow-hidden shadow-xl transition-colors duration-500 ${
+          isFocused ? 'ring-2 ring-[#E60033] ring-offset-2 ring-offset-[#050505]' : ''
+        } ${isSpeaking ? 'border-[#E60033]/40' : 'border-white/10'}`}
       >
         {/* Blog Image Layer: blurred color wash behind the content */}
         {showImage && (
@@ -283,10 +286,21 @@ function NewsCard({ item, index, isSpeaking, onToggleSpeak, isSummaryOpen, summa
 
 const EMPTY_SUMMARY_STATE = { loading: false, error: null, text: null };
 
-export function NewsGrid({ feed, isBookmarked, onToggleBookmark, emptyMessage = 'INITIALIZING_NEURAL_LINK...' }) {
+export function NewsGrid({ feed, isBookmarked, onToggleBookmark, emptyMessage = 'INITIALIZING_NEURAL_LINK...', focusedId }) {
   const [speakingKey, setSpeakingKey] = useState(null);
   const [openSummaryId, setOpenSummaryId] = useState(null);
   const [summaries, setSummaries] = useState({});
+  const cardRefs = useRef({});
+
+  // Keyboard nav (see App.jsx's j/k handler) drives focus by id rather than
+  // DOM order, since this grid's own clusterPrimaryId filtering can differ
+  // from whatever list the caller is iterating - scroll to whichever card
+  // actually matches instead of assuming an index lines up.
+  useEffect(() => {
+    if (focusedId && cardRefs.current[focusedId]) {
+      cardRefs.current[focusedId].scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  }, [focusedId]);
 
   // Stop any speech in progress if the component unmounts (e.g. hot reload, navigation)
   useEffect(() => {
@@ -386,6 +400,8 @@ export function NewsGrid({ feed, isBookmarked, onToggleBookmark, emptyMessage = 
           onSpeakSummary={handleSpeakSummary}
           isBookmarked={isBookmarked(item.id)}
           onToggleBookmark={onToggleBookmark}
+          isFocused={focusedId === item.id}
+          cardRef={(el) => { if (el) cardRefs.current[item.id] = el; }}
         />
       ))}
     </div>

@@ -1,8 +1,9 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { Search, Bookmark, Command, Sparkles, ArrowUp } from 'lucide-react';
-import { NewsGrid } from './NewsGrid';
+import { Search, Bookmark, Command, Sparkles, ArrowUp, BarChart3 } from 'lucide-react';
+import { NewsGrid, trackClick } from './NewsGrid';
 import { CustomCursor } from './CustomCursor';
 import { CommandPalette } from './CommandPalette';
+import { StatsPanel } from './StatsPanel';
 import ChatBot from './ChatBot';
 import { useLiveFeed } from './hooks/useLiveFeed';
 import { useBookmarks } from './hooks/useBookmarks';
@@ -25,6 +26,8 @@ function App() {
   const [selectedCategory, setSelectedCategory] = useState('All');
   const [showSavedOnly, setShowSavedOnly] = useState(false);
   const [isPaletteOpen, setIsPaletteOpen] = useState(false);
+  const [isStatsOpen, setIsStatsOpen] = useState(false);
+  const [focusedIndex, setFocusedIndex] = useState(-1);
 
   // Tracks which stories have been seen so a "N new" pill can appear when
   // the 30s feed poll brings in something fresh, without needing to force
@@ -48,14 +51,43 @@ function App() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  // Global Cmd/Ctrl+K to open the command palette, Escape to close it.
+  // Global Cmd/Ctrl+K to open the command palette, Escape to close it, plus
+  // HN-style single-key navigation (j/k/Enter/s) for anyone who'd rather not
+  // touch the mouse. Single-key shortcuts bail out while any text input has
+  // focus (search box, chatbot, palette) so they don't hijack typing.
   useEffect(() => {
     function handleKeyDown(e) {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault();
         setIsPaletteOpen((prev) => !prev);
-      } else if (e.key === 'Escape') {
+        return;
+      }
+      if (e.key === 'Escape') {
         setIsPaletteOpen(false);
+        setIsStatsOpen(false);
+        return;
+      }
+
+      const tag = e.target.tagName;
+      const isTyping = tag === 'INPUT' || tag === 'TEXTAREA' || e.target.isContentEditable;
+      if (isTyping) return;
+
+      if (e.key === '/') {
+        e.preventDefault();
+        setIsPaletteOpen(true);
+      } else if (e.key === 'j') {
+        setFocusedIndex((prev) => Math.min(prev + 1, navigableItemsRef.current.length - 1));
+      } else if (e.key === 'k') {
+        setFocusedIndex((prev) => Math.max(prev - 1, 0));
+      } else if (e.key === 'Enter') {
+        const item = navigableItemsRef.current[focusedIndexRef.current];
+        if (item) {
+          trackClick(item.id);
+          window.open(item.url, '_blank', 'noopener');
+        }
+      } else if (e.key === 's') {
+        const item = navigableItemsRef.current[focusedIndexRef.current];
+        if (item) onToggleBookmarkRef.current(item);
       }
     }
     window.addEventListener('keydown', handleKeyDown);
@@ -95,6 +127,34 @@ function App() {
     () => feed.filter((item) => matchesQuery(item, searchQuery)),
     [feed, searchQuery]
   );
+
+  // Mirrors NewsGrid's own clusterPrimaryId filtering so j/k indices line up
+  // with what's actually rendered as its own card (clustered secondary
+  // stories only show up inside another card's "+N more sources" expander).
+  const navigableItems = useMemo(
+    () => visibleFeed.filter((item) => !item.clusterPrimaryId),
+    [visibleFeed]
+  );
+
+  // Kept in refs rather than read directly in the keydown handler, since
+  // that listener is registered once (empty deps) to avoid re-binding on
+  // every keystroke - reading state directly there would close over stale
+  // values from the first render.
+  const navigableItemsRef = useRef(navigableItems);
+  const focusedIndexRef = useRef(focusedIndex);
+  const onToggleBookmarkRef = useRef(toggleBookmark);
+  navigableItemsRef.current = navigableItems;
+  focusedIndexRef.current = focusedIndex;
+  onToggleBookmarkRef.current = toggleBookmark;
+
+  // A filter change can leave focusedIndex pointing at a completely
+  // different story than the one the user was just looking at - clearer to
+  // drop focus than to silently jump.
+  useEffect(() => {
+    setFocusedIndex(-1);
+  }, [searchQuery, selectedSource, selectedCategory, showSavedOnly]);
+
+  const focusedItem = focusedIndex >= 0 ? navigableItems[focusedIndex] : null;
 
   const emptyMessage = loading
     ? 'INITIALIZING_NEURAL_LINK...'
@@ -141,6 +201,15 @@ function App() {
                   {visibleFeed.length} {visibleFeed.length === 1 ? 'story' : 'stories'}
                 </span>
               )}
+              <button
+                type="button"
+                onClick={() => setIsStatsOpen(true)}
+                aria-label="View feed stats"
+                className="text-white/40 hover:text-white transition-colors"
+              >
+                <BarChart3 size={15} />
+              </button>
+
               <div className="flex items-center space-x-2 opacity-70">
                 <div className={`w-1.5 h-1.5 rounded-full ${loading ? 'bg-white/60 animate-pulse' : 'bg-emerald-400'} shadow-[0_0_10px_currentColor]`} />
                 <span className="font-mono text-[10px] tracking-widest uppercase">
@@ -234,6 +303,7 @@ function App() {
             isBookmarked={isBookmarked}
             onToggleBookmark={toggleBookmark}
             emptyMessage={emptyMessage}
+            focusedId={focusedItem?.id}
           />
         </main>
       </div>
@@ -247,6 +317,8 @@ function App() {
         showSavedOnly={showSavedOnly}
         onToggleSaved={() => setShowSavedOnly((prev) => !prev)}
       />
+
+      <StatsPanel isOpen={isStatsOpen} onClose={() => setIsStatsOpen(false)} />
 
       <ChatBot />
     </>

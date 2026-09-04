@@ -48,6 +48,34 @@ function cacheSummary(id, summary) {
 const TOP_N_TO_AUTO_SUMMARIZE = 5;
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+// The 429 Gemini returns for this quota is a *daily* limit
+// (GenerateRequestsPerDayPerProjectPerModel-FreeTier), but the retryDelay it
+// reports is only seconds - clearly meant for a per-minute quota, not a
+// per-day one. Retrying every 5-minute ingestion cycle on that advice just
+// burns more of the next window's quota on guaranteed failures. Instead,
+// back off for real once we see a 429, doubling on repeated hits (in case
+// quota was only partially available) up to a few hours, and reset the
+// moment a call actually succeeds.
+const QUOTA_BACKOFF_INITIAL_MS = 15 * 60 * 1000;
+const QUOTA_BACKOFF_MAX_MS = 4 * 60 * 60 * 1000;
+let quotaBackoffMs = 0;
+let quotaBackoffUntil = 0;
+
+function isQuotaBackoffActive() {
+  return Date.now() < quotaBackoffUntil;
+}
+
+function recordQuotaExhaustion() {
+  quotaBackoffMs = quotaBackoffMs ? Math.min(quotaBackoffMs * 2, QUOTA_BACKOFF_MAX_MS) : QUOTA_BACKOFF_INITIAL_MS;
+  quotaBackoffUntil = Date.now() + quotaBackoffMs;
+  console.log(`Gemini quota exhausted - backing off auto-summarization until ${new Date(quotaBackoffUntil).toISOString()}`);
+}
+
+function recordQuotaSuccess() {
+  quotaBackoffMs = 0;
+  quotaBackoffUntil = 0;
+}
+
 // Returns { summary, category } from a single Gemini call - piggybacking
 // category classification onto the summary request rather than a separate
 // call, since every request against the free tier's 20/day quota counts.
@@ -102,6 +130,11 @@ Content: ${(article.text || '').slice(0, 4000)}`;
 async function autoSummarizeTopArticles() {
   if (!dbEnabled) return;
 
+  if (isQuotaBackoffActive()) {
+    console.log(`Skipping auto-summarize - in quota backoff until ${new Date(quotaBackoffUntil).toISOString()}`);
+    return;
+  }
+
   const topIds = currentFeed.slice(0, TOP_N_TO_AUTO_SUMMARIZE).map((a) => a.id);
   const idsNeedingSummary = await filterIdsWithoutSummary(topIds);
   if (idsNeedingSummary.length === 0) return;
@@ -115,10 +148,14 @@ async function autoSummarizeTopArticles() {
     try {
       const { summary, category } = await generateSummary(article);
       await saveSummary(id, summary, category);
+      recordQuotaSuccess();
       console.log(`Auto-summarized (${category || 'uncategorized'}): ${article.title}`);
     } catch (error) {
       console.error(`Auto-summarize failed for "${article.title}":`, error.message);
-      if (error.status === 429) break; // quota exhausted - no point trying the rest
+      if (error.status === 429) {
+        recordQuotaExhaustion();
+        break; // quota exhausted - no point trying the rest
+      }
     }
 
     await sleep(2000); // stay polite to the free-tier rate limit
@@ -194,6 +231,37 @@ app.get('/api/feed', (req, res) => {
   res.json(currentFeed);
 });
 
+// Pure aggregation over whatever's already in currentFeed - no extra DB
+// round-trip and no AI cost, so this is safe to poll freely from the UI.
+app.get('/api/stats', (req, res) => {
+  const bySource = new Map();
+  const byCategory = new Map();
+  let summarizedCount = 0;
+  let clusteredCount = 0;
+
+  for (const item of currentFeed) {
+    if (item.source) bySource.set(item.source, (bySource.get(item.source) || 0) + 1);
+    if (item.category) byCategory.set(item.category, (byCategory.get(item.category) || 0) + 1);
+    if (item.summary) summarizedCount += 1;
+    if (item.relatedSources && item.relatedSources.length > 0) clusteredCount += 1;
+  }
+
+  const topClicked = [...currentFeed]
+    .filter((item) => (item.clickCount || 0) > 0)
+    .sort((a, b) => (b.clickCount || 0) - (a.clickCount || 0))
+    .slice(0, 10)
+    .map((item) => ({ id: item.id, title: item.title, source: item.source, clickCount: item.clickCount || 0, url: item.url }));
+
+  res.json({
+    totalArticles: currentFeed.length,
+    summarizedCount,
+    clusteredStories: clusteredCount,
+    bySource: Array.from(bySource, ([source, count]) => ({ source, count })).sort((a, b) => b.count - a.count),
+    byCategory: Array.from(byCategory, ([category, count]) => ({ category, count })).sort((a, b) => b.count - a.count),
+    topClicked
+  });
+});
+
 app.post('/api/chat', async (req, res) => {
   try {
     const { message, history } = req.body;
@@ -201,6 +269,10 @@ app.post('/api/chat', async (req, res) => {
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {
       return res.status(500).json({ error: "GEMINI_API_KEY is missing." });
+    }
+
+    if (isQuotaBackoffActive()) {
+      return res.status(429).json({ error: "Rate limit reached on the Gemini API free tier. Please wait a bit and try again." });
     }
 
     const ai = new GoogleGenAI({ apiKey });
@@ -223,9 +295,11 @@ Answer the user's questions strictly based on the news, or just be generally hel
         model: 'gemini-3.6-flash',
         contents: prompt
     });
+    recordQuotaSuccess();
 
     res.json({ response: response.text });
   } catch (error) {
+    if (error.status === 429) recordQuotaExhaustion();
     sendGeminiError(res, error, "Failed to communicate with Neural Link.");
   }
 });
@@ -243,7 +317,12 @@ app.post('/api/summarize', async (req, res) => {
       return res.json({ summary: cached });
     }
 
+    if (isQuotaBackoffActive()) {
+      return res.status(429).json({ error: "Rate limit reached on the Gemini API free tier. Please wait a bit and try again." });
+    }
+
     const { summary, category } = await generateSummary(article);
+    recordQuotaSuccess();
 
     if (dbEnabled) {
       await saveSummary(id, summary, category);
@@ -253,6 +332,7 @@ app.post('/api/summarize', async (req, res) => {
 
     res.json({ summary });
   } catch (error) {
+    if (error.status === 429) recordQuotaExhaustion();
     sendGeminiError(res, error, "Failed to generate summary.");
   }
 });
