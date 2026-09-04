@@ -273,6 +273,13 @@ export function NewsGrid({ feed, isBookmarked, onToggleBookmark, emptyMessage = 
     setOpenSummaryId(item.id);
     if (summaries[item.id]?.text) return; // already fetched, just reopen
 
+    if (item.summary) {
+      // Already auto-summarized server-side (top-of-feed background job) -
+      // no need to hit the API at all.
+      setSummaries(prev => ({ ...prev, [item.id]: { loading: false, error: null, text: item.summary } }));
+      return;
+    }
+
     setSummaries(prev => ({ ...prev, [item.id]: { loading: true, error: null, text: null } }));
 
     try {
