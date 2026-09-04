@@ -131,4 +131,3 @@ The frontend expects a deployed backend at `https://ima-9ay9.onrender.com` in pr
 - Image scraping is best-effort: sites that block scraping or omit Open Graph tags fall back to a stylized placeholder card.
 - Click counts (and therefore the trending badge) update in the served feed once per ingestion cycle (~5 min), not in real time - `/api/track-click` writes straight to Supabase, but `currentFeed` only re-syncs from there on the next cycle.
 - Articles summarized before the category feature shipped won't retroactively get a category - it only backfills as the feed rotates and they're replaced by newly-summarized stories.
-- Known, minor, pre-existing issue: RSS-sourced titles aren't HTML-entity-decoded, so titles with apostrophes/quotes can render as `&#8217;` etc.

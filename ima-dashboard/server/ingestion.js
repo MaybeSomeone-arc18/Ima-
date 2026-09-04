@@ -31,6 +31,22 @@ function generateHash(url, title) {
   return crypto.createHash('sha256').update(url + title).digest('hex');
 }
 
+const NAMED_ENTITIES = {
+  amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' '
+};
+
+// WordPress-based feeds (TechCrunch, GoPro's, etc.) commonly emit titles
+// with numeric character references for smart quotes/dashes (&#8217; etc.)
+// rather than literal unicode - decode them rather than pull in a library
+// for something this narrow.
+function decodeEntities(str) {
+  if (!str) return str;
+  return str
+    .replace(/&#x([0-9a-f]+);/gi, (_, hex) => String.fromCodePoint(parseInt(hex, 16)))
+    .replace(/&#(\d+);/g, (_, dec) => String.fromCodePoint(parseInt(dec, 10)))
+    .replace(/&(amp|lt|gt|quot|apos|nbsp);/g, (_, name) => NAMED_ENTITIES[name]);
+}
+
 // Most feeds (Hacker News, TechCrunch) don't embed images in the RSS payload,
 // so real cover images have to be scraped from the article page itself.
 // Cached in-memory per URL so we don't re-fetch the same article every ingestion cycle.
@@ -133,11 +149,16 @@ export async function fetchAndNormalizeFeeds() {
       const feed = await parser.parseURL(feedUrl);
       
       for (const item of feed.items) {
-        const title = item.title || '';
+        const rawTitle = item.title || '';
         const url = item.link || '';
         const rawText = item.contentSnippet || item.content || '';
-        const id = generateHash(url, title);
-        
+        // Hash the raw title, not the decoded one, so existing article ids
+        // (and everything keyed off them in Supabase - summaries, click
+        // counts) stay stable across this change instead of every article
+        // silently becoming "new".
+        const id = generateHash(url, rawTitle);
+        const title = decodeEntities(rawTitle);
+
         let imageUrl = null;
         if (item.enclosure && item.enclosure.url) {
           imageUrl = item.enclosure.url;
@@ -154,8 +175,8 @@ export async function fetchAndNormalizeFeeds() {
           title,
           url,
           imageUrl,
-          text: rawText.trim(),
-          source: feed.title || feedUrl,
+          text: decodeEntities(rawText.trim()),
+          source: decodeEntities(feed.title) || feedUrl,
           pubDate: item.pubDate || new Date().toISOString()
         });
       }
