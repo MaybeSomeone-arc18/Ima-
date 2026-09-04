@@ -1,16 +1,78 @@
-import React from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Search, Bookmark, Command } from 'lucide-react';
 import { NewsGrid } from './NewsGrid';
 import { CustomCursor } from './CustomCursor';
+import { CommandPalette } from './CommandPalette';
 import ChatBot from './ChatBot';
 import { useLiveFeed } from './hooks/useLiveFeed';
+import { useBookmarks } from './hooks/useBookmarks';
+
+function matchesQuery(item, query) {
+  if (!query) return true;
+  const q = query.toLowerCase();
+  return (
+    (item.title && item.title.toLowerCase().includes(q)) ||
+    (item.text && item.text.toLowerCase().includes(q))
+  );
+}
 
 function App() {
   const { feed, loading, error } = useLiveFeed();
+  const { bookmarks, isBookmarked, toggleBookmark } = useBookmarks();
+
+  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedSource, setSelectedSource] = useState('All');
+  const [showSavedOnly, setShowSavedOnly] = useState(false);
+  const [isPaletteOpen, setIsPaletteOpen] = useState(false);
+
+  // Global Cmd/Ctrl+K to open the command palette, Escape to close it.
+  useEffect(() => {
+    function handleKeyDown(e) {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setIsPaletteOpen((prev) => !prev);
+      } else if (e.key === 'Escape') {
+        setIsPaletteOpen(false);
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
+  const sources = useMemo(() => {
+    const unique = new Set(feed.map((item) => item.source).filter(Boolean));
+    return ['All', ...Array.from(unique).sort()];
+  }, [feed]);
+
+  const savedList = useMemo(
+    () => Object.values(bookmarks).sort((a, b) => new Date(b.pubDate) - new Date(a.pubDate)),
+    [bookmarks]
+  );
+
+  const visibleFeed = useMemo(() => {
+    const base = showSavedOnly ? savedList : feed;
+    return base.filter(
+      (item) =>
+        (selectedSource === 'All' || item.source === selectedSource) &&
+        matchesQuery(item, searchQuery)
+    );
+  }, [showSavedOnly, savedList, feed, selectedSource, searchQuery]);
+
+  const paletteResults = useMemo(
+    () => feed.filter((item) => matchesQuery(item, searchQuery)),
+    [feed, searchQuery]
+  );
+
+  const emptyMessage = loading
+    ? 'INITIALIZING_NEURAL_LINK...'
+    : showSavedOnly
+    ? 'NO SAVED STORIES — TAP THE BOOKMARK ICON ON A CARD'
+    : 'NO STORIES MATCH YOUR FILTERS';
 
   return (
     <>
       <CustomCursor />
-      
+
       <div className="surreal-bg">
         <div className="blob blob-1" />
         <div className="blob blob-2" />
@@ -33,7 +95,7 @@ function App() {
             <div className="flex items-center gap-5 mt-4 md:mt-0">
               {!loading && (
                 <span className="font-mono text-[10px] tracking-widest text-white/30 uppercase">
-                  {feed.length} {feed.length === 1 ? 'story' : 'stories'}
+                  {visibleFeed.length} {visibleFeed.length === 1 ? 'story' : 'stories'}
                 </span>
               )}
               <div className="flex items-center space-x-2 opacity-70">
@@ -42,6 +104,51 @@ function App() {
                   {loading ? 'Synchronizing' : 'Connected'}
                 </span>
               </div>
+            </div>
+          </div>
+
+          {/* Search + filters row */}
+          <div className="px-6 pb-4 max-w-7xl mx-auto flex flex-col sm:flex-row sm:items-center gap-3">
+            <button
+              type="button"
+              onClick={() => setIsPaletteOpen(true)}
+              className="flex items-center gap-2 flex-1 min-w-[200px] max-w-sm px-4 py-2 rounded-full bg-white/5 border border-white/10 text-white/40 hover:text-white hover:border-white/20 transition-colors text-left"
+            >
+              <Search size={14} />
+              <span className="text-sm flex-1 truncate">{searchQuery || 'Search headlines...'}</span>
+              <span className="hidden sm:flex items-center gap-0.5 text-[10px] font-mono text-white/30 border border-white/10 rounded px-1.5 py-0.5">
+                <Command size={9} />K
+              </span>
+            </button>
+
+            <div className="flex items-center gap-2 overflow-x-auto pb-1 sm:pb-0">
+              {sources.map((source) => (
+                <button
+                  key={source}
+                  type="button"
+                  onClick={() => setSelectedSource(source)}
+                  className={`shrink-0 px-3 py-1.5 rounded-full text-[10px] tracking-wide uppercase font-medium border transition-colors ${
+                    selectedSource === source
+                      ? 'bg-[#E60033]/20 border-[#E60033]/40 text-[#E60033]'
+                      : 'border-white/10 text-white/40 hover:text-white hover:border-white/30'
+                  }`}
+                >
+                  {source}
+                </button>
+              ))}
+
+              <button
+                type="button"
+                onClick={() => setShowSavedOnly((prev) => !prev)}
+                className={`shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] tracking-wide uppercase font-medium border transition-colors ${
+                  showSavedOnly
+                    ? 'bg-[#E60033]/20 border-[#E60033]/40 text-[#E60033]'
+                    : 'border-white/10 text-white/40 hover:text-white hover:border-white/30'
+                }`}
+              >
+                <Bookmark size={11} fill={showSavedOnly ? 'currentColor' : 'none'} />
+                Saved{savedList.length > 0 ? ` (${savedList.length})` : ''}
+              </button>
             </div>
           </div>
         </header>
@@ -55,10 +162,25 @@ function App() {
               </div>
             </div>
           )}
-          
-          <NewsGrid feed={feed} />
+
+          <NewsGrid
+            feed={visibleFeed}
+            isBookmarked={isBookmarked}
+            onToggleBookmark={toggleBookmark}
+            emptyMessage={emptyMessage}
+          />
         </main>
       </div>
+
+      <CommandPalette
+        isOpen={isPaletteOpen}
+        onClose={() => setIsPaletteOpen(false)}
+        query={searchQuery}
+        onQueryChange={setSearchQuery}
+        results={paletteResults}
+        showSavedOnly={showSavedOnly}
+        onToggleSaved={() => setShowSavedOnly((prev) => !prev)}
+      />
 
       <ChatBot />
     </>

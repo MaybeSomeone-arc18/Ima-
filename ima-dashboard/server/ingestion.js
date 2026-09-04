@@ -21,7 +21,10 @@ const feeds = [
   'https://techcrunch.com/feed/',
   'https://news.ycombinator.com/rss',
   'https://stratechery.com/feed/',
-  'https://blog.github.com/changelog/all.atom'
+  'https://blog.github.com/changelog/all.atom',
+  'https://www.theverge.com/rss/index.xml',
+  'https://feeds.arstechnica.com/arstechnica/index',
+  'https://www.wired.com/feed/rss'
 ];
 
 function generateHash(url, title) {

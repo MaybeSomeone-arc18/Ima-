@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Radio, ExternalLink, Volume2, Square, Sparkles, X } from 'lucide-react';
+import { Radio, ExternalLink, Volume2, Square, Sparkles, X, Bookmark } from 'lucide-react';
 import { getApiBaseUrl } from './lib/api';
 
 function generateMeshGradient(id) {
@@ -95,23 +95,23 @@ function SummaryFlyout({ state, isSpeaking, onSpeak, onClose }) {
   );
 }
 
-function NewsCard({ item, index, isSpeaking, onToggleSpeak, isSummaryOpen, summaryState, isSummarySpeaking, onToggleSummary, onSpeakSummary }) {
+function NewsCard({ item, index, isSpeaking, onToggleSpeak, isSummaryOpen, summaryState, isSummarySpeaking, onToggleSummary, onSpeakSummary, isBookmarked, onToggleBookmark }) {
   const [imageFailed, setImageFailed] = useState(false);
   const hues = generateMeshGradient(item.id);
   const showImage = item.imageUrl && !imageFailed;
 
   return (
-    <div className="mb-6 break-inside-avoid">
+    <motion.div
+      initial={{ opacity: 0, y: 40, filter: 'blur(15px)', scale: 0.98 }}
+      animate={{ opacity: 1, y: 0, filter: 'blur(0px)', scale: 1 }}
+      transition={{
+        duration: 0.8,
+        ease: [0.16, 1, 0.3, 1], // Deep ease-out for surreal floating entrance
+        delay: Math.min(index, 8) * 0.06
+      }}
+      className="mb-6 break-inside-avoid"
+    >
       <motion.div
-        layout
-        initial={{ opacity: 0, y: 40, filter: 'blur(15px)', scale: 0.98 }}
-        animate={{ opacity: 1, y: 0, filter: 'blur(0px)', scale: 1 }}
-        exit={{ opacity: 0, scale: 0.95, filter: 'blur(10px)' }}
-        transition={{
-          duration: 1.2,
-          ease: [0.16, 1, 0.3, 1], // Deep ease-out for surreal floating entrance
-          delay: Math.min(index, 8) * 0.06
-        }}
         whileHover={{
           y: -8,
           scale: 1.015,
@@ -144,6 +144,10 @@ function NewsCard({ item, index, isSpeaking, onToggleSpeak, isSummaryOpen, summa
           </span>
 
           <div className="flex items-center gap-3">
+            <IconButton active={isBookmarked} onClick={() => onToggleBookmark(item)} label={isBookmarked ? 'Remove bookmark' : 'Save for later'}>
+              <Bookmark size={12} fill={isBookmarked ? 'currentColor' : 'none'} />
+            </IconButton>
+
             <IconButton active={isSummaryOpen} onClick={() => onToggleSummary(item)} label={isSummaryOpen ? 'Close AI summary' : 'Get an AI summary'}>
               <Sparkles size={12} />
             </IconButton>
@@ -216,13 +220,13 @@ function NewsCard({ item, index, isSpeaking, onToggleSpeak, isSummaryOpen, summa
           />
         )}
       </AnimatePresence>
-    </div>
+    </motion.div>
   );
 }
 
 const EMPTY_SUMMARY_STATE = { loading: false, error: null, text: null };
 
-export function NewsGrid({ feed }) {
+export function NewsGrid({ feed, isBookmarked, onToggleBookmark, emptyMessage = 'INITIALIZING_NEURAL_LINK...' }) {
   const [speakingKey, setSpeakingKey] = useState(null);
   const [openSummaryId, setOpenSummaryId] = useState(null);
   const [summaries, setSummaries] = useState({});
@@ -290,7 +294,7 @@ export function NewsGrid({ feed }) {
     return (
       <div className="flex justify-center items-center h-[50vh]">
         <p className="text-white/20 font-mono tracking-widest text-sm animate-pulse">
-          INITIALIZING_NEURAL_LINK...
+          {emptyMessage}
         </p>
       </div>
     );
@@ -298,22 +302,22 @@ export function NewsGrid({ feed }) {
 
   return (
     <div className="masonry-grid px-6 max-w-7xl mx-auto pb-24">
-      <AnimatePresence>
-        {feed.map((item, index) => (
-          <NewsCard
-            key={item.id}
-            item={item}
-            index={index}
-            isSpeaking={speakingKey === item.id}
-            onToggleSpeak={handleToggleSpeak}
-            isSummaryOpen={openSummaryId === item.id}
-            summaryState={summaries[item.id] || EMPTY_SUMMARY_STATE}
-            isSummarySpeaking={speakingKey === `${item.id}:summary`}
-            onToggleSummary={handleToggleSummary}
-            onSpeakSummary={handleSpeakSummary}
-          />
-        ))}
-      </AnimatePresence>
+      {feed.map((item, index) => (
+        <NewsCard
+          key={item.id}
+          item={item}
+          index={index}
+          isSpeaking={speakingKey === item.id}
+          onToggleSpeak={handleToggleSpeak}
+          isSummaryOpen={openSummaryId === item.id}
+          summaryState={summaries[item.id] || EMPTY_SUMMARY_STATE}
+          isSummarySpeaking={speakingKey === `${item.id}:summary`}
+          onToggleSummary={handleToggleSummary}
+          onSpeakSummary={handleSpeakSummary}
+          isBookmarked={isBookmarked(item.id)}
+          onToggleBookmark={onToggleBookmark}
+        />
+      ))}
     </div>
   );
 }
