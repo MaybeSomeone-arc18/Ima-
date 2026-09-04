@@ -1,7 +1,24 @@
 import React, { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Radio, ExternalLink, Volume2, Square, Sparkles, X, Bookmark } from 'lucide-react';
+import { Radio, ExternalLink, Volume2, Square, Sparkles, X, Bookmark, Flame, Layers } from 'lucide-react';
 import { getApiBaseUrl } from './lib/api';
+
+const TRENDING_THRESHOLD = 3;
+
+function trackClick(id) {
+  if (!id) return;
+  try {
+    const url = `${getApiBaseUrl()}/api/track-click`;
+    const payload = JSON.stringify({ id });
+    if (navigator.sendBeacon) {
+      navigator.sendBeacon(url, new Blob([payload], { type: 'application/json' }));
+    } else {
+      fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: payload, keepalive: true });
+    }
+  } catch {
+    // best-effort only - a failed click ping shouldn't affect navigation
+  }
+}
 
 function generateMeshGradient(id) {
   // Simple deterministic hash for consistent colors per article
@@ -97,8 +114,10 @@ function SummaryFlyout({ state, isSpeaking, onSpeak, onClose }) {
 
 function NewsCard({ item, index, isSpeaking, onToggleSpeak, isSummaryOpen, summaryState, isSummarySpeaking, onToggleSummary, onSpeakSummary, isBookmarked, onToggleBookmark }) {
   const [imageFailed, setImageFailed] = useState(false);
+  const [showRelated, setShowRelated] = useState(false);
   const hues = generateMeshGradient(item.id);
   const showImage = item.imageUrl && !imageFailed;
+  const isTrending = (item.clickCount || 0) >= TRENDING_THRESHOLD;
 
   return (
     <motion.div
@@ -139,9 +158,17 @@ function NewsCard({ item, index, isSpeaking, onToggleSpeak, isSummaryOpen, summa
         <div className="absolute inset-0 bg-gradient-to-t from-[#050505]/95 via-[#050505]/70 to-[#050505]/20 pointer-events-none" />
 
         <div className="flex justify-between items-center mb-5 relative z-10">
-          <span className="text-[10px] tracking-[0.15em] text-white/50 uppercase font-semibold">
-            {item.source}
-          </span>
+          <div className="flex items-center gap-2.5">
+            <span className="text-[10px] tracking-[0.15em] text-white/50 uppercase font-semibold">
+              {item.source}
+            </span>
+            {isTrending && (
+              <span className="flex items-center gap-1 text-[9px] font-mono text-orange-400 uppercase tracking-wide">
+                <Flame size={10} fill="currentColor" />
+                Trending
+              </span>
+            )}
+          </div>
 
           <div className="flex items-center gap-3">
             <IconButton active={isBookmarked} onClick={() => onToggleBookmark(item)} label={isBookmarked ? 'Remove bookmark' : 'Save for later'}>
@@ -169,11 +196,41 @@ function NewsCard({ item, index, isSpeaking, onToggleSpeak, isSummaryOpen, summa
           </div>
         </div>
 
-        <h3 className="text-white text-xl md:text-[1.35rem] font-bold tracking-tight leading-snug mb-4 relative z-10">
-          <a href={item.url} target="_blank" rel="noreferrer" className="hover:text-[#E60033] transition-colors duration-300">
+        <h3 className="text-white text-xl md:text-[1.35rem] font-bold tracking-tight leading-snug mb-2 relative z-10">
+          <a href={item.url} target="_blank" rel="noreferrer" onClick={() => trackClick(item.id)} className="hover:text-[#E60033] transition-colors duration-300">
             {item.title}
           </a>
         </h3>
+
+        {item.relatedSources?.length > 0 && (
+          <div className="mb-4 relative z-10">
+            <button
+              type="button"
+              onClick={() => setShowRelated((s) => !s)}
+              className="flex items-center gap-1.5 text-[10px] font-mono text-white/40 hover:text-white transition-colors"
+            >
+              <Layers size={11} />
+              {showRelated ? 'Hide other sources' : `+${item.relatedSources.length} more source${item.relatedSources.length > 1 ? 's' : ''} covering this`}
+            </button>
+
+            {showRelated && (
+              <div className="mt-2 space-y-1.5 pl-1 border-l border-white/10">
+                {item.relatedSources.map((rel) => (
+                  <a
+                    key={rel.id}
+                    href={rel.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    onClick={() => trackClick(rel.id)}
+                    className="block pl-3 text-xs text-white/60 hover:text-[#E60033] transition-colors truncate"
+                  >
+                    <span className="text-white/40">{rel.source}:</span> {rel.title}
+                  </a>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
         <div className="relative z-10 mb-4 w-full h-44 overflow-hidden rounded-2xl border border-white/10 group-hover:border-white/20 transition-colors">
           {showImage ? (
@@ -297,7 +354,13 @@ export function NewsGrid({ feed, isBookmarked, onToggleBookmark, emptyMessage = 
     }
   };
 
-  if (!feed || feed.length === 0) {
+  // Articles clustered under another story (see server/clustering.js) are
+  // surfaced through that story's "+N more sources" expander instead of
+  // getting their own card, so a multi-source event doesn't repeat itself
+  // 3-4 times across the grid.
+  const visibleFeed = feed.filter((item) => !item.clusterPrimaryId);
+
+  if (!visibleFeed || visibleFeed.length === 0) {
     return (
       <div className="flex justify-center items-center h-[50vh]">
         <p className="text-white/20 font-mono tracking-widest text-sm animate-pulse">
@@ -309,7 +372,7 @@ export function NewsGrid({ feed, isBookmarked, onToggleBookmark, emptyMessage = 
 
   return (
     <div className="masonry-grid px-6 max-w-7xl mx-auto pb-24">
-      {feed.map((item, index) => (
+      {visibleFeed.map((item, index) => (
         <NewsCard
           key={item.id}
           item={item}

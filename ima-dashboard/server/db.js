@@ -27,7 +27,8 @@ function rowToArticle(row) {
     category: row.category,
     importanceScore: row.importance_score,
     pubDate: row.pub_date,
-    summary: row.summary
+    summary: row.summary,
+    clickCount: row.click_count || 0
   };
 }
 
@@ -49,9 +50,10 @@ export async function loadArticlesFromDb() {
   return (data || []).map(rowToArticle);
 }
 
-// Upserts the raw scraped fields only - summary/summary_generated_at are
-// deliberately omitted from the payload so this never clobbers a summary
-// that was already generated for an article on a previous ingestion cycle.
+// Upserts the raw scraped fields only. summary/summary_generated_at and
+// category are deliberately omitted from the payload - none of them are
+// ever set by the RSS scrape, so including them (even as null) would wipe
+// out whatever the AI pipeline previously wrote on every 5-minute cycle.
 export async function upsertArticles(articles) {
   if (!dbEnabled || articles.length === 0) return;
 
@@ -62,8 +64,6 @@ export async function upsertArticles(articles) {
     image_url: a.imageUrl,
     text: a.text,
     source: a.source,
-    category: a.category || null,
-    importance_score: a.importanceScore || null,
     pub_date: a.pubDate,
     updated_at: new Date().toISOString()
   }));
@@ -91,16 +91,25 @@ export async function getSummary(id) {
   return data?.summary || null;
 }
 
-export async function saveSummary(id, summary) {
+export async function saveSummary(id, summary, category) {
   if (!dbEnabled) return;
 
-  const { error } = await supabase
-    .from('articles')
-    .update({ summary, summary_generated_at: new Date().toISOString() })
-    .eq('id', id);
+  const update = { summary, summary_generated_at: new Date().toISOString() };
+  if (category) update.category = category;
+
+  const { error } = await supabase.from('articles').update(update).eq('id', id);
 
   if (error) {
     console.error('Failed to save summary to Supabase:', error.message);
+  }
+}
+
+export async function incrementClickCount(id) {
+  if (!dbEnabled) return;
+
+  const { error } = await supabase.rpc('increment_click_count', { article_id: id });
+  if (error) {
+    console.error('Failed to record click in Supabase:', error.message);
   }
 }
 

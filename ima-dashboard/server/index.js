@@ -1,7 +1,8 @@
 import express from 'express';
 import cors from 'cors';
 import { fetchAndNormalizeFeeds } from './ingestion.js';
-import { GoogleGenAI } from '@google/genai';
+import { clusterArticles } from './clustering.js';
+import { GoogleGenAI, Type } from '@google/genai';
 import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
@@ -12,8 +13,11 @@ import {
   upsertArticles,
   getSummary,
   saveSummary,
-  filterIdsWithoutSummary
+  filterIdsWithoutSummary,
+  incrementClickCount
 } from './db.js';
+
+const CATEGORIES = ['AI', 'Security', 'Hardware', 'Startups/Funding', 'Policy', 'DevTools', 'General'];
 
 dotenv.config();
 
@@ -44,6 +48,9 @@ function cacheSummary(id, summary) {
 const TOP_N_TO_AUTO_SUMMARIZE = 5;
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+// Returns { summary, category } from a single Gemini call - piggybacking
+// category classification onto the summary request rather than a separate
+// call, since every request against the free tier's 20/day quota counts.
 async function generateSummary(article) {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
@@ -51,7 +58,7 @@ async function generateSummary(article) {
   }
 
   const ai = new GoogleGenAI({ apiKey });
-  const prompt = `Summarize this news item in 2-3 short, punchy sentences for a busy reader. Plain text, no preamble, no markdown.
+  const prompt = `Summarize this news item in 2-3 short, punchy sentences for a busy reader, and classify it into exactly one category.
 
 Title: ${article.title}
 Source: ${article.source}
@@ -59,10 +66,31 @@ Content: ${(article.text || '').slice(0, 4000)}`;
 
   const response = await ai.models.generateContent({
     model: 'gemini-3.6-flash',
-    contents: prompt
+    contents: prompt,
+    config: {
+      responseMimeType: 'application/json',
+      responseSchema: {
+        type: Type.OBJECT,
+        properties: {
+          summary: { type: Type.STRING, description: '2-3 short, punchy sentences. Plain text, no preamble, no markdown.' },
+          category: { type: Type.STRING, enum: CATEGORIES }
+        },
+        required: ['summary', 'category']
+      }
+    }
   });
 
-  return (response.text || '').trim();
+  try {
+    const parsed = JSON.parse(response.text || '{}');
+    return {
+      summary: (parsed.summary || '').trim(),
+      category: CATEGORIES.includes(parsed.category) ? parsed.category : null
+    };
+  } catch {
+    // Fall back gracefully if the model ever returns malformed JSON - a
+    // missing category isn't worth failing the whole summary over.
+    return { summary: (response.text || '').trim(), category: null };
+  }
 }
 
 // Keeps the top of the feed pre-summarized so most visitors never trigger a
@@ -85,9 +113,9 @@ async function autoSummarizeTopArticles() {
     if (!article) continue;
 
     try {
-      const summary = await generateSummary(article);
-      await saveSummary(id, summary);
-      console.log(`Auto-summarized: ${article.title}`);
+      const { summary, category } = await generateSummary(article);
+      await saveSummary(id, summary, category);
+      console.log(`Auto-summarized (${category || 'uncategorized'}): ${article.title}`);
     } catch (error) {
       console.error(`Auto-summarize failed for "${article.title}":`, error.message);
       if (error.status === 429) break; // quota exhausted - no point trying the rest
@@ -135,6 +163,10 @@ async function updateFeed() {
       const refreshed = await loadArticlesFromDb();
       if (refreshed.length > 0) currentFeed = refreshed;
     }
+
+    // Cheap (no AI call), so it runs every cycle regardless of dbEnabled -
+    // groups same-story coverage across sources for the frontend to collapse.
+    clusterArticles(currentFeed);
 
   } catch (error) {
     console.error('Error fetching raw stories:', error);
@@ -206,23 +238,34 @@ app.post('/api/summarize', async (req, res) => {
       return res.status(404).json({ error: "Article not found in the current feed." });
     }
 
-    const cached = dbEnabled ? await getSummary(id) : summaryCache.get(id);
+    const cached = dbEnabled ? await getSummary(id) : summaryCache.get(id)?.summary;
     if (cached) {
       return res.json({ summary: cached });
     }
 
-    const summary = await generateSummary(article);
+    const { summary, category } = await generateSummary(article);
 
     if (dbEnabled) {
-      await saveSummary(id, summary);
+      await saveSummary(id, summary, category);
     } else {
-      cacheSummary(id, summary);
+      cacheSummary(id, { summary, category });
     }
 
     res.json({ summary });
   } catch (error) {
     sendGeminiError(res, error, "Failed to generate summary.");
   }
+});
+
+app.post('/api/track-click', async (req, res) => {
+  const { id } = req.body;
+  if (!id) return res.status(400).json({ error: 'Missing article id.' });
+
+  // Fire-and-forget from the caller's perspective (sendBeacon doesn't wait
+  // on a response body anyway) - don't let a DB hiccup surface as an error
+  // for something this low-stakes.
+  incrementClickCount(id).catch(() => {});
+  res.status(204).end();
 });
 
 // Root endpoint for health checks
@@ -239,6 +282,7 @@ app.listen(PORT, async () => {
   const persisted = await loadArticlesFromDb();
   if (persisted.length > 0) {
     currentFeed = persisted;
+    clusterArticles(currentFeed);
     console.log(`Loaded ${persisted.length} articles from Supabase.`);
   }
 

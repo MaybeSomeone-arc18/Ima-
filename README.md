@@ -9,10 +9,13 @@ A dark, glassmorphic news dashboard that aggregates Hacker News, TechCrunch, Str
 - **Persisted to Supabase** — every ingestion cycle upserts into Postgres, and the feed loads from there on startup, so a Render restart or redeploy serves data immediately instead of waiting on a fresh scrape (optional — falls back to in-memory-only if unconfigured)
 - **Real cover images** — most source feeds don't embed images, so the backend scrapes each article's `og:image` as a fallback and caches the result
 - **AI chat assistant** — ask questions about current headlines, answered by Google's Gemini API with the live feed as context
-- **AI summaries** — a per-card "summarize" button that gets a short Gemini-generated summary in a flyout. The top 5 stories are auto-summarized in the background as they enter the feed; every summary is cached in Supabase by article id so it's generated once, ever, across every visitor
+- **AI summaries + categories** — a per-card "summarize" button that gets a short Gemini-generated summary (plus a category, from the same call) in a flyout. The top 5 stories are auto-summarized in the background as they enter the feed; every summary is cached in Supabase by article id so it's generated once, ever, across every visitor. Category chips only list categories that actually exist among summarized articles, since classifying all ~150 up front isn't affordable on the free tier — the list grows as more get summarized
 - **Read aloud** — every card and every AI summary can be read aloud via the browser's built-in text-to-speech (Web Speech API)
 - **Bookmarks** — save articles for later; persisted in `localStorage` with the full article data, so saved items survive the feed's 5-minute rotation
-- **Search, source filters, and a command palette** — filter by keyword or source, or hit `Cmd/Ctrl+K` for a quick-search overlay
+- **Search, source and category filters, and a command palette** — filter by keyword, source, or AI-assigned category, or hit `Cmd/Ctrl+K` for a quick-search overlay
+- **Story clustering** — same-story coverage from different sources (e.g. three outlets on one Tesla story) collapses into one card with a "+N more sources" expander, computed purely by title similarity server-side — no AI cost
+- **Trending badge** — link clicks are tracked per article; anything past a threshold gets a 🔥 badge
+- **Installable PWA** — has a manifest, icons, and a conservative service worker (API calls always hit the network; only hashed build assets are cached)
 - **Responsive, animated UI** — React 19 + Tailwind v4 + Framer Motion, built mobile-first
 
 ## Project structure
@@ -29,10 +32,11 @@ ima-dashboard/
 │       ├── useLiveFeed.js      # Polls /api/feed
 │       └── useBookmarks.js     # localStorage-backed bookmarks
 ├── server/                    # Express backend
-│   ├── index.js                # API routes (/api/feed, /api/chat, /api/summarize) + ingestion scheduler
+│   ├── index.js                # API routes (/api/feed, /api/chat, /api/summarize, /api/track-click) + ingestion scheduler
 │   ├── ingestion.js             # RSS fetching, dedup, og:image scraping
-│   ├── db.js                    # Supabase persistence: load/upsert articles, get/save summaries
-│   ├── enricher.js              # Gemini-based categorization (not currently wired in)
+│   ├── clustering.js            # Same-story detection across sources (title token overlap, no AI)
+│   ├── db.js                    # Supabase persistence: load/upsert articles, get/save summaries, click tracking
+│   ├── enricher.js              # Superseded by the summary+category call in index.js; not wired in
 │   └── cache.js                 # Disk cache used by enricher.js
 └── kaisen-bridge/              # Standalone helper script for an external tool integration
 ```
@@ -71,11 +75,22 @@ Supabase is optional for local dev — without it the app still runs, it just re
      pub_date timestamptz,
      summary text,
      summary_generated_at timestamptz,
+     click_count integer not null default 0,
      updated_at timestamptz not null default now()
    );
    create index if not exists articles_pub_date_idx on articles (pub_date desc);
+   create index if not exists articles_click_count_idx on articles (click_count desc);
    alter table articles enable row level security;
    create policy "Public read access" on articles for select using (true);
+
+   create or replace function increment_click_count(article_id text)
+   returns void
+   language sql
+   security definer
+   set search_path = public
+   as $$
+     update articles set click_count = click_count + 1 where id = article_id;
+   $$;
    ```
 3. Set `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` (Project Settings → API → service_role secret — **not** the anon/publishable key, since the backend needs to bypass RLS to write) in `.env`.
 
@@ -112,5 +127,8 @@ The frontend expects a deployed backend at `https://ima-9ay9.onrender.com` in pr
 
 ## Known limitations
 
-- `server/enricher.js` (Gemini-based categorization/scoring) and `kaisen-bridge/ima-skill.js` (an external integration helper) exist in the codebase but aren't called from the running app.
+- `server/enricher.js` (superseded, see above) and `kaisen-bridge/ima-skill.js` (an external integration helper) exist in the codebase but aren't called from the running app.
 - Image scraping is best-effort: sites that block scraping or omit Open Graph tags fall back to a stylized placeholder card.
+- Click counts (and therefore the trending badge) update in the served feed once per ingestion cycle (~5 min), not in real time - `/api/track-click` writes straight to Supabase, but `currentFeed` only re-syncs from there on the next cycle.
+- Articles summarized before the category feature shipped won't retroactively get a category - it only backfills as the feed rotates and they're replaced by newly-summarized stories.
+- Known, minor, pre-existing issue: RSS-sourced titles aren't HTML-entity-decoded, so titles with apostrophes/quotes can render as `&#8217;` etc.

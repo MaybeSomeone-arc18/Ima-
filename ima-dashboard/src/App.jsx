@@ -1,5 +1,5 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { Search, Bookmark, Command } from 'lucide-react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { Search, Bookmark, Command, Sparkles, ArrowUp } from 'lucide-react';
 import { NewsGrid } from './NewsGrid';
 import { CustomCursor } from './CustomCursor';
 import { CommandPalette } from './CommandPalette';
@@ -22,8 +22,31 @@ function App() {
 
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedSource, setSelectedSource] = useState('All');
+  const [selectedCategory, setSelectedCategory] = useState('All');
   const [showSavedOnly, setShowSavedOnly] = useState(false);
   const [isPaletteOpen, setIsPaletteOpen] = useState(false);
+
+  // Tracks which stories have been seen so a "N new" pill can appear when
+  // the 30s feed poll brings in something fresh, without needing to force
+  // a scroll or re-render the whole grid - the feed already updates live.
+  const seenIdsRef = useRef(null);
+  const [newCount, setNewCount] = useState(0);
+
+  useEffect(() => {
+    if (feed.length === 0) return;
+    if (seenIdsRef.current === null) {
+      seenIdsRef.current = new Set(feed.map((item) => item.id));
+      return;
+    }
+    const unseenCount = feed.filter((item) => !seenIdsRef.current.has(item.id)).length;
+    if (unseenCount > 0) setNewCount(unseenCount);
+  }, [feed]);
+
+  const dismissNewStories = () => {
+    seenIdsRef.current = new Set(feed.map((item) => item.id));
+    setNewCount(0);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
 
   // Global Cmd/Ctrl+K to open the command palette, Escape to close it.
   useEffect(() => {
@@ -44,6 +67,15 @@ function App() {
     return ['All', ...Array.from(unique).sort()];
   }, [feed]);
 
+  // Only articles that have gone through the AI summary pipeline carry a
+  // category (deliberately: classifying all 150 articles up front would
+  // burn through the free-tier quota in one ingestion cycle), so this list
+  // - and the chip row it drives - grows organically as more get summarized.
+  const categories = useMemo(() => {
+    const unique = new Set(feed.map((item) => item.category).filter(Boolean));
+    return Array.from(unique).sort();
+  }, [feed]);
+
   const savedList = useMemo(
     () => Object.values(bookmarks).sort((a, b) => new Date(b.pubDate) - new Date(a.pubDate)),
     [bookmarks]
@@ -54,9 +86,10 @@ function App() {
     return base.filter(
       (item) =>
         (selectedSource === 'All' || item.source === selectedSource) &&
+        (selectedCategory === 'All' || item.category === selectedCategory) &&
         matchesQuery(item, searchQuery)
     );
-  }, [showSavedOnly, savedList, feed, selectedSource, searchQuery]);
+  }, [showSavedOnly, savedList, feed, selectedSource, selectedCategory, searchQuery]);
 
   const paletteResults = useMemo(
     () => feed.filter((item) => matchesQuery(item, searchQuery)),
@@ -93,6 +126,16 @@ function App() {
             </div>
 
             <div className="flex items-center gap-5 mt-4 md:mt-0">
+              {newCount > 0 && (
+                <button
+                  type="button"
+                  onClick={dismissNewStories}
+                  className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-[#E60033]/15 border border-[#E60033]/30 text-[#E60033] text-[10px] font-mono uppercase tracking-wide animate-pulse hover:animate-none transition-colors"
+                >
+                  <ArrowUp size={10} />
+                  {newCount} new
+                </button>
+              )}
               {!loading && (
                 <span className="font-mono text-[10px] tracking-widest text-white/30 uppercase">
                   {visibleFeed.length} {visibleFeed.length === 1 ? 'story' : 'stories'}
@@ -151,6 +194,29 @@ function App() {
               </button>
             </div>
           </div>
+
+          {categories.length > 0 && (
+            <div className="px-6 pb-4 max-w-7xl mx-auto flex items-center gap-2 overflow-x-auto -mt-1">
+              <span className="flex items-center gap-1 text-[9px] font-mono text-white/20 uppercase shrink-0">
+                <Sparkles size={9} />
+                Category
+              </span>
+              {['All', ...categories].map((cat) => (
+                <button
+                  key={cat}
+                  type="button"
+                  onClick={() => setSelectedCategory(cat)}
+                  className={`shrink-0 px-3 py-1 rounded-full text-[10px] tracking-wide uppercase font-medium border transition-colors ${
+                    selectedCategory === cat
+                      ? 'bg-[#E60033]/20 border-[#E60033]/40 text-[#E60033]'
+                      : 'border-white/10 text-white/40 hover:text-white hover:border-white/30'
+                  }`}
+                >
+                  {cat}
+                </button>
+              ))}
+            </div>
+          )}
         </header>
 
         {/* Main Content */}
