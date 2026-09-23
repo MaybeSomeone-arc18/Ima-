@@ -77,7 +77,7 @@ function cacheSummary(id, summary) {
 }
 
 const TOP_N_TO_AUTO_SUMMARIZE = 5;
-const MAX_EMBEDS_PER_CYCLE = 5;
+const MAX_EMBEDS_PER_CYCLE = 25;
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 // Returns { summary, category } from a single Gemini call - piggybacking
