@@ -114,12 +114,10 @@ Supabase is optional for local dev — without it the app still runs, it just re
 
 | Variable | Required | Description |
 |---|---|---|
-| `GEMINI_API_KEY` | Yes* | Google Gemini API key, used by `/api/chat`, `/api/summarize`, and `/api/ask` (both the `moss` and `naive` retrieval modes — `naive` embeds articles/queries with Gemini directly). Get one at [Google AI Studio](https://aistudio.google.com/apikey). *Not required if `GEMINI_API_KEYS` is set. |
+| `GEMINI_API_KEY` | Yes* | Google Gemini API key, used by `/api/chat`, `/api/summarize`, and `/api/ask` (both the `pgvector` and `naive` retrieval modes — both embed articles/queries with Gemini directly). Get one at [Google AI Studio](https://aistudio.google.com/apikey). *Not required if `GEMINI_API_KEYS` is set. |
 | `GEMINI_API_KEYS` | No | Comma-separated pool of Gemini API keys, as an alternative to a single `GEMINI_API_KEY` — ideally one key per separate Google Cloud project, since keys under the *same* project share its quota. When a key hits a 429, `withKeyRotation()` (`server/quota.js`) automatically retries on the next key in the pool that isn't currently backed off, so one key's daily cap doesn't take the app down. Falls back to `GEMINI_API_KEY` if unset. |
-| `SUPABASE_URL` | No | Supabase project API URL. Enables persistence and shared summary caching — see above. |
+| `SUPABASE_URL` | No | Supabase project API URL. Enables persistence, shared summary caching, and (via its pgvector extension) the indexed `pgvector` mode of `/api/ask` — see above. |
 | `SUPABASE_SERVICE_ROLE_KEY` | No | Supabase **service role** (secret) key — server-side only, never exposed to the frontend. |
-| `MOSS_PROJECT_ID` | No | Moss project id. Enables indexing articles into a Moss semantic search index and the `moss` mode of `/api/ask`, additive to Supabase persistence — see `server/moss.js`. |
-| `MOSS_PROJECT_KEY` | No | Moss project key — server-side only, never exposed to the frontend. |
 | `LIVEKIT_URL` | No | LiveKit project WebSocket URL. Enables `/api/livekit-token` and the Ask bar's voice mode. Must match the value `ima-voice-agent` runs with. |
 | `LIVEKIT_API_KEY` | No | LiveKit API key — server-side only. Must match `ima-voice-agent`'s. |
 | `LIVEKIT_API_SECRET` | No | LiveKit API secret — server-side only. Must match `ima-voice-agent`'s. |
