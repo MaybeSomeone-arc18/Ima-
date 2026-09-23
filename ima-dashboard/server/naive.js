@@ -1,12 +1,8 @@
 import { GoogleGenAI } from '@google/genai';
 import { getAllArticlesForNaiveSearch, getArticlesByIds } from './db.js';
 import { runAnswerPipeline } from './lib/qaPipeline.js';
-import { withKeyRotation } from './quota.js';
+import { embedText } from './lib/embedQuery.js';
 
-// Exported so index.js's auto-embed step uses the exact same model to embed
-// articles that this file uses to embed queries against them - a mismatch
-// here would silently break cosine similarity.
-export const EMBEDDING_MODEL = 'gemini-embedding-001';
 const NAIVE_TOP_K = 5;
 
 function cosineSimilarity(a, b) {
@@ -32,18 +28,12 @@ function cosineSimilarity(a, b) {
 // in JS - an O(n) linear scan with no ANN structure. This is what a team
 // gets by default from Postgres + app code alone, honestly built (no
 // artificial slowdowns), which is exactly the comparison worth making
-// against Moss's purpose-built retrieval in agent.js.
+// against pgvector.js's HNSW-indexed retrieval - same embedding step, only
+// the search itself (linear scan vs. an index) differs.
 async function retrieveNaive(query, createAiClient, fetchArticles) {
   const articles = await fetchArticles();
 
-  const embedResponse = await withKeyRotation((apiKey) =>
-    createAiClient(apiKey).models.embedContent({
-      model: EMBEDDING_MODEL,
-      contents: query,
-      config: { taskType: 'RETRIEVAL_QUERY' }
-    })
-  );
-  const queryVector = embedResponse.embeddings?.[0]?.values || [];
+  const queryVector = await embedText(createAiClient, query, { taskType: 'RETRIEVAL_QUERY' });
   if (queryVector.length === 0) return [];
 
   const scored = [];

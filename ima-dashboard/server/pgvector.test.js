@@ -1,31 +1,34 @@
-// Run with: node --test server/agent.test.js
+// Run with: node --test server/pgvector.test.js
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { answerQuestion } from './agent.js';
+import { answerQuestion } from './pgvector.js';
 
 process.env.GEMINI_API_KEY ||= 'test-key';
 
-function makeMossStub(docsByQuery) {
+function makeIndexStub(rowsByQuery) {
   const calls = [];
   return {
     calls,
-    queryMoss: async (query, opts) => {
-      calls.push(query);
-      return { docs: docsByQuery[query] || [], query, ...opts };
+    queryIndex: async (vector, matchCount) => {
+      calls.push(vector.query); // the stub embedding below tags each vector with its source query
+      return (rowsByQuery[vector.query] || []).slice(0, matchCount);
     }
   };
 }
 
-// A fake GoogleGenAI client: `plan` answers the sufficiency-check call,
-// `answer` answers the final synthesis call. Each call to
-// ai.models.generateContent consumes the next queued response.
-function makeAiStub(responses) {
-  const queue = [...responses];
+// A fake GoogleGenAI client: `embedContent` returns a "vector" that's really
+// just a tagged marker carrying the query text through to queryIndex (real
+// cosine math is queryIndex's/Postgres's job, not something this stub needs
+// to simulate), and each call to `generateContent` consumes the next queued
+// plan/synthesis response.
+function makeAiStub(generations) {
+  const genQueue = [...generations];
   return {
     models: {
+      embedContent: async ({ contents }) => ({ embeddings: [{ values: { length: 1, query: contents } }] }),
       generateContent: async () => {
-        const next = queue.shift();
-        if (!next) throw new Error('makeAiStub: no more queued responses');
+        const next = genQueue.shift();
+        if (!next) throw new Error('makeAiStub: no more queued generations');
         return { text: next };
       }
     }
@@ -33,10 +36,10 @@ function makeAiStub(responses) {
 }
 
 test('answerQuestion returns the documented shape for a single-hop (sufficient) answer', async () => {
-  const { queryMoss, calls } = makeMossStub({
+  const { queryIndex, calls } = makeIndexStub({
     'what happened at openai': [
-      { id: 'a1', text: 'OpenAI shipped a new model.', score: 0.9 },
-      { id: 'a2', text: 'Investors reacted positively.', score: 0.7 }
+      { id: 'a1', text: 'OpenAI shipped a new model.', similarity: 0.9 },
+      { id: 'a2', text: 'Investors reacted positively.', similarity: 0.7 }
     ]
   });
 
@@ -46,7 +49,7 @@ test('answerQuestion returns the documented shape for a single-hop (sufficient) 
   ]);
 
   const result = await answerQuestion('what happened at openai', {
-    queryMoss,
+    queryIndex,
     createAiClient: () => ai,
     lookupArticles: async (ids) =>
       new Map(ids.map((id) => [id, { title: `Title ${id}`, url: `https://example.com/${id}`, source: 'TestSource' }]))
@@ -75,10 +78,10 @@ test('answerQuestion returns the documented shape for a single-hop (sufficient) 
 });
 
 test('answerQuestion runs follow-up sub-queries as additional hops when insufficient', async () => {
-  const { queryMoss, calls } = makeMossStub({
-    'broad question': [{ id: 'a1', text: 'Some partial context.', score: 0.5 }],
-    'sub query one': [{ id: 'a2', text: 'More detail one.', score: 0.8 }],
-    'sub query two': [{ id: 'a3', text: 'More detail two.', score: 0.6 }]
+  const { queryIndex, calls } = makeIndexStub({
+    'broad question': [{ id: 'a1', text: 'Some partial context.', similarity: 0.5 }],
+    'sub query one': [{ id: 'a2', text: 'More detail one.', similarity: 0.8 }],
+    'sub query two': [{ id: 'a3', text: 'More detail two.', similarity: 0.6 }]
   });
 
   const ai = makeAiStub([
@@ -87,7 +90,7 @@ test('answerQuestion runs follow-up sub-queries as additional hops when insuffic
   ]);
 
   const result = await answerQuestion('broad question', {
-    queryMoss,
+    queryIndex,
     createAiClient: () => ai,
     lookupArticles: async (ids) => new Map(ids.map((id) => [id, { title: id, url: '', source: 'Src' }]))
   });
@@ -99,14 +102,14 @@ test('answerQuestion runs follow-up sub-queries as additional hops when insuffic
 });
 
 test('answerQuestion caps total hops at 5 even if the model proposes more sub-queries', async () => {
-  const docsByQuery = {
-    'question': [{ id: 'a0', text: 'seed', score: 0.4 }],
-    'sq1': [{ id: 'a1', text: 't1', score: 0.5 }],
-    'sq2': [{ id: 'a2', text: 't2', score: 0.5 }],
-    'sq3': [{ id: 'a3', text: 't3', score: 0.5 }],
-    'sq4': [{ id: 'a4', text: 't4', score: 0.5 }] // should never be queried - would exceed the 5-hop cap
+  const rowsByQuery = {
+    question: [{ id: 'a0', text: 'seed', similarity: 0.4 }],
+    sq1: [{ id: 'a1', text: 't1', similarity: 0.5 }],
+    sq2: [{ id: 'a2', text: 't2', similarity: 0.5 }],
+    sq3: [{ id: 'a3', text: 't3', similarity: 0.5 }],
+    sq4: [{ id: 'a4', text: 't4', similarity: 0.5 }] // should never be queried - would exceed the 5-hop cap
   };
-  const { queryMoss, calls } = makeMossStub(docsByQuery);
+  const { queryIndex, calls } = makeIndexStub(rowsByQuery);
 
   const ai = makeAiStub([
     // A misbehaving/overshooting model proposing more than the schema's
@@ -116,20 +119,20 @@ test('answerQuestion caps total hops at 5 even if the model proposes more sub-qu
   ]);
 
   const result = await answerQuestion('question', {
-    queryMoss,
+    queryIndex,
     createAiClient: () => ai,
     lookupArticles: async () => new Map()
   });
 
-  assert.ok(calls.length <= 5, `expected at most 5 Moss hops, got ${calls.length}`);
+  assert.ok(calls.length <= 5, `expected at most 5 index queries, got ${calls.length}`);
   assert.ok(result.retrievals.length <= 5);
   assert.deepEqual(calls, ['question', 'sq1', 'sq2', 'sq3']);
 });
 
 test('answerQuestion dedupes overlapping hits across hops, keeping the higher score', async () => {
-  const { queryMoss } = makeMossStub({
-    'q': [{ id: 'shared', text: 'v1', score: 0.3 }],
-    'sub': [{ id: 'shared', text: 'v2', score: 0.9 }]
+  const { queryIndex } = makeIndexStub({
+    q: [{ id: 'shared', text: 'v1', similarity: 0.3 }],
+    sub: [{ id: 'shared', text: 'v2', similarity: 0.9 }]
   });
 
   const ai = makeAiStub([
@@ -138,7 +141,7 @@ test('answerQuestion dedupes overlapping hits across hops, keeping the higher sc
   ]);
 
   const result = await answerQuestion('q', {
-    queryMoss,
+    queryIndex,
     createAiClient: () => ai,
     lookupArticles: async (ids) => new Map(ids.map((id) => [id, { title: id, url: '', source: 'S' }]))
   });

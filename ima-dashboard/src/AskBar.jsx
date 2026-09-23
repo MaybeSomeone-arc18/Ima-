@@ -9,7 +9,7 @@ import { LatencyHUD } from './LatencyHUD';
 // than introducing a new color, so Naive gets its own identity without a
 // new visual language.
 const MODES = [
-  { key: 'moss', label: 'Moss', accent: '#E60033' },
+  { key: 'pgvector', label: 'Indexed', accent: '#E60033' },
   { key: 'naive', label: 'Naive', accent: '#3C3CFF' }
 ];
 
@@ -72,8 +72,8 @@ function AnswerPanel({ result, accent, label, isRefreshing }) {
 export default function AskBar() {
   const [isOpen, setIsOpen] = useState(false);
   const [question, setQuestion] = useState('');
-  const [mode, setMode] = useState('moss');
-  const [resultsByMode, setResultsByMode] = useState({ moss: null, naive: null });
+  const [mode, setMode] = useState('pgvector');
+  const [resultsByMode, setResultsByMode] = useState({ pgvector: null, naive: null });
   const [loadingMode, setLoadingMode] = useState(null);
   const [error, setError] = useState(null);
 
@@ -83,7 +83,7 @@ export default function AskBar() {
   const roomRef = useRef(null);
   const audioContainerRef = useRef(null);
 
-  const hasAnyResult = Boolean(resultsByMode.moss || resultsByMode.naive);
+  const hasAnyResult = Boolean(resultsByMode.pgvector || resultsByMode.naive);
 
   // Tears down the room and any attached remote audio elements on unmount,
   // in case the panel closes (or the whole app unmounts) mid-call.
@@ -272,11 +272,11 @@ export default function AskBar() {
 
               {!hasAnyResult && voiceStatus === 'idle' && !error && !loadingMode && (
                 <p className="text-xs text-white/30 font-mono text-center py-10">
-                  Ask a question about the live feed. Run it in both Moss and Naive mode to compare retrieval speed side by side.
+                  Ask a question about the live feed. Run it in both Indexed and Naive mode to compare retrieval speed side by side.
                 </p>
               )}
 
-              <div className={`grid gap-4 ${resultsByMode.moss && resultsByMode.naive ? 'md:grid-cols-2' : 'grid-cols-1'}`}>
+              <div className={`grid gap-4 ${resultsByMode.pgvector && resultsByMode.naive ? 'md:grid-cols-2' : 'grid-cols-1'}`}>
                 {MODES.map((m) => {
                   const result = resultsByMode[m.key];
                   const isLoadingThis = loadingMode === m.key;

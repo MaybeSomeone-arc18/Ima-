@@ -18,16 +18,16 @@ import {
   filterIdsWithoutEmbedding,
   incrementClickCount
 } from './db.js';
-import { mossEnabled, indexArticles } from './moss.js';
 import { hasAvailableKey, withKeyRotation } from './quota.js';
-import { answerQuestion } from './agent.js';
-import { answerQuestionNaive, EMBEDDING_MODEL } from './naive.js';
+import { answerQuestion } from './pgvector.js';
+import { answerQuestionNaive } from './naive.js';
+import { EMBEDDING_MODEL } from './lib/embedQuery.js';
 import { AccessToken } from 'livekit-server-sdk';
 import { randomUUID } from 'crypto';
 
-// Background cloud SDKs (Moss's polling connection, Supabase, LiveKit) can
-// emit a socket-level 'error' with no listener attached, which Node treats
-// as an uncaught exception and kills the whole process - observed in
+// Background cloud SDKs (Supabase, LiveKit) can emit a socket-level 'error'
+// with no listener attached, which Node treats as an uncaught exception and
+// kills the whole process - observed in
 // practice as a `SocketError: other side closed` on an HTTP/2 connection,
 // unrelated to any in-flight request. Log and keep serving rather than let a
 // transient network blip on a background connection take the whole app down.
@@ -166,7 +166,7 @@ async function autoSummarizeTopArticles() {
 
 // Embeds an article's title+summary with Gemini for the naive retrieval path
 // (server/naive.js) to do its own cosine-similarity search against, as a
-// fair comparison to Moss's purpose-built indexing. Uses RETRIEVAL_DOCUMENT,
+// fair comparison to pgvector.js's indexed ANN search. Uses RETRIEVAL_DOCUMENT,
 // the task type meant for content that will be searched over (paired with
 // RETRIEVAL_QUERY on the query side in naive.js).
 async function generateEmbedding(article) {
@@ -237,7 +237,6 @@ async function updateFeed() {
     console.log(`Feed update complete. Current feed size: ${currentFeed.length}`);
 
     await upsertArticles(currentFeed);
-    if (mossEnabled) await indexArticles(currentFeed);
 
     // Reload from Supabase so currentFeed picks up any summary already
     // stored for these articles (from a previous cycle's auto-summarize, or
@@ -393,7 +392,7 @@ app.post('/api/summarize', async (req, res) => {
   }
 });
 
-// mode 'moss' (default) uses the Moss-indexed retrieval path (agent.js);
+// mode 'pgvector' (default) uses the indexed ANN retrieval path (pgvector.js);
 // mode 'naive' uses the DIY Postgres + app-side linear-scan path (naive.js) -
 // same question in, same response shape out, so the two are directly
 // comparable. See naive.js for what "naive" means here: no artificial
@@ -404,17 +403,14 @@ app.post('/api/ask', async (req, res) => {
     if (!question || typeof question !== 'string' || !question.trim()) {
       return res.status(400).json({ error: "Missing question." });
     }
-    if (mode !== undefined && mode !== 'moss' && mode !== 'naive') {
-      return res.status(400).json({ error: "Invalid mode. Use 'moss' or 'naive'." });
+    if (mode !== undefined && mode !== 'pgvector' && mode !== 'naive') {
+      return res.status(400).json({ error: "Invalid mode. Use 'pgvector' or 'naive'." });
     }
 
     const useNaive = mode === 'naive';
 
-    if (!useNaive && !mossEnabled) {
-      return res.status(503).json({ error: "Semantic search (Moss) is not configured. Set MOSS_PROJECT_ID and MOSS_PROJECT_KEY." });
-    }
-    if (useNaive && !dbEnabled) {
-      return res.status(503).json({ error: "Naive retrieval requires Supabase. Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY." });
+    if (!dbEnabled) {
+      return res.status(503).json({ error: "Retrieval requires Supabase. Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY." });
     }
 
     const result = useNaive

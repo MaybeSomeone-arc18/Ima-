@@ -16,7 +16,7 @@ async function timeRotatedCall(fn) {
 }
 
 // Runs one retrieval hop against whatever mechanism the caller supplies
-// (Moss, a naive linear scan, ...), timing it and recording it into
+// (indexed ANN search, a naive linear scan, ...), timing it and recording it into
 // `retrievals` regardless of outcome so callers get a full hop-by-hop trace
 // even when a hop comes back empty or errors out. `retrieve` is the only
 // thing that differs between retrieval paths - everything downstream of the
@@ -112,7 +112,7 @@ ${context || '(none)'}`;
 }
 
 // Multi-hop retrieval-augmented answer pipeline, shared by every retrieval
-// path (Moss, naive linear scan, ...):
+// path (indexed ANN search, naive linear scan, ...):
 //   1. Retrieve with the raw question (hop 1).
 //   2. Ask Gemini whether that's enough, and for up to 3 follow-up queries.
 //   3. Run each follow-up as its own retrieval hop (hop 2..n), capped at

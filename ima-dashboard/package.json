@@ -13,7 +13,6 @@
   },
   "dependencies": {
     "@google/genai": "^2.21.0",
-    "@moss-js/moss": "^1.9.0",
     "@mozilla/readability": "^0.6.0",
     "@supabase/supabase-js": "^2.115.0",
     "@tailwindcss/vite": "^4.3.3",

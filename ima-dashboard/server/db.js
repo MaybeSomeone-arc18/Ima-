@@ -117,8 +117,8 @@ export async function saveSummary(id, summary, category) {
 }
 
 // Looks up display metadata (title, url, source) for a set of article ids -
-// used to join Moss search hits (which only carry an id and the indexed
-// text) back to the fields the frontend needs to render a citation.
+// used to join retrieval hits (which only carry an id and the indexed text)
+// back to the fields the frontend needs to render a citation.
 export async function getArticlesByIds(ids) {
   if (!dbEnabled || ids.length === 0) return new Map();
 
@@ -135,14 +135,37 @@ export async function getArticlesByIds(ids) {
   return new Map((data || []).map((row) => [row.id, { title: row.title, url: row.url, source: row.source }]));
 }
 
+// `embedding` is a pgvector column, not jsonb - sent as a bracketed string
+// ("[0.1,0.2,...]") rather than a raw JS array, since that's pgvector's text
+// input format and PostgREST has no JSON->vector cast to fall back on.
 export async function saveEmbedding(id, vector) {
   if (!dbEnabled) return;
 
-  const { error } = await supabase.from('articles').update({ embedding: vector }).eq('id', id);
+  const { error } = await supabase.from('articles').update({ embedding: JSON.stringify(vector) }).eq('id', id);
 
   if (error) {
     console.error('Failed to save embedding to Supabase:', error.message);
   }
+}
+
+// Runs the match_articles() pgvector similarity search (see the
+// replace_moss_with_pgvector migration) - an HNSW-indexed nearest-neighbor
+// search over every embedded article, done in Postgres instead of the
+// app-side linear scan getAllArticlesForNaiveSearch() below feeds naive.js.
+export async function queryPgvectorIndex(queryVector, matchCount) {
+  if (!dbEnabled) return [];
+
+  const { data, error } = await supabase.rpc('match_articles', {
+    query_embedding: queryVector,
+    match_count: matchCount
+  });
+
+  if (error) {
+    console.error('Failed to query pgvector index:', error.message);
+    return [];
+  }
+
+  return data || [];
 }
 
 // Ids (from the given candidate list) that don't have an embedding yet -
@@ -177,8 +200,8 @@ const NAIVE_FETCH_PAGE_SIZE = 1000;
 // A fresh, uncached select of every article's id/title/url/source/embedding -
 // used by the naive retrieval path (server/naive.js) to honestly mirror a
 // setup with no persistent vector index: every hop re-fetches the full table
-// over the network (paginating past PostgREST's row cap if needed) instead
-// of reading from an in-memory/ANN index like Moss.
+// over the network (paginating past PostgREST's row cap if needed) and scores
+// every candidate in JS, instead of an indexed search like pgvector.js's.
 export async function getAllArticlesForNaiveSearch() {
   if (!dbEnabled) return [];
 
@@ -201,7 +224,13 @@ export async function getAllArticlesForNaiveSearch() {
     from += NAIVE_FETCH_PAGE_SIZE;
   }
 
-  return rows;
+  // PostgREST serializes a pgvector column as its text form ("[0.1,0.2,...]"),
+  // not a JSON array - parse it back so naive.js's cosine similarity scan can
+  // index into it numerically.
+  return rows.map((row) => ({
+    ...row,
+    embedding: typeof row.embedding === 'string' ? JSON.parse(row.embedding) : row.embedding
+  }));
 }
 
 export async function incrementClickCount(id) {
