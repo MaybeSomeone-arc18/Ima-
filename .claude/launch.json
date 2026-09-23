@@ -1,0 +1,18 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "ima-server",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "start", "--prefix", "ima-dashboard"],
+      "port": 3001,
+      "autoPort": true
+    },
+    {
+      "name": "ima-frontend",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev", "--prefix", "ima-dashboard"],
+      "port": 5173
+    }
+  ]
+}

@@ -8,10 +8,12 @@
     "build": "vite build",
     "lint": "oxlint",
     "preview": "vite preview",
-    "start": "node server/index.js"
+    "start": "node server/index.js",
+    "test": "node --test server/*.test.js"
   },
   "dependencies": {
     "@google/genai": "^2.21.0",
+    "@moss-js/moss": "^1.9.0",
     "@mozilla/readability": "^0.6.0",
     "@supabase/supabase-js": "^2.115.0",
     "@tailwindcss/vite": "^4.3.3",
@@ -21,6 +23,8 @@
     "express": "^5.2.1",
     "framer-motion": "^13.2.0",
     "jsdom": "^29.1.1",
+    "livekit-client": "^2.22.3",
+    "livekit-server-sdk": "^2.19.1",
     "lucide-react": "^1.39.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",

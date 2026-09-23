@@ -5,6 +5,7 @@ import { CustomCursor } from './CustomCursor';
 import { CommandPalette } from './CommandPalette';
 import { StatsPanel } from './StatsPanel';
 import ChatBot from './ChatBot';
+import AskBar from './AskBar';
 import { useLiveFeed } from './hooks/useLiveFeed';
 import { useBookmarks } from './hooks/useBookmarks';
 
@@ -343,6 +344,7 @@ function App() {
       <StatsPanel isOpen={isStatsOpen} onClose={() => setIsStatsOpen(false)} />
 
       <ChatBot />
+      <AskBar />
     </>
   );
 }

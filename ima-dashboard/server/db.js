@@ -32,22 +32,34 @@ function rowToArticle(row) {
   };
 }
 
+const PAGE_SIZE = 1000;
+
 // Loads whatever was persisted from the last ingestion run, so the feed has
 // data immediately on a cold start instead of waiting for a fresh scrape.
+// Paginated because Supabase/PostgREST caps a single select at 1000 rows by
+// default - without this the feed silently truncated to the newest 1000 of
+// what's actually a 3000+ row table.
 export async function loadArticlesFromDb() {
   if (!dbEnabled) return [];
 
-  const { data, error } = await supabase
-    .from('articles')
-    .select('*')
-    .order('pub_date', { ascending: false });
+  const rows = [];
+  for (let from = 0; ; from += PAGE_SIZE) {
+    const { data, error } = await supabase
+      .from('articles')
+      .select('*')
+      .order('pub_date', { ascending: false })
+      .range(from, from + PAGE_SIZE - 1);
 
-  if (error) {
-    console.error('Failed to load articles from Supabase:', error.message);
-    return [];
+    if (error) {
+      console.error('Failed to load articles from Supabase:', error.message);
+      return rows.map(rowToArticle);
+    }
+
+    rows.push(...data);
+    if (data.length < PAGE_SIZE) break;
   }
 
-  return (data || []).map(rowToArticle);
+  return rows.map(rowToArticle);
 }
 
 // Upserts the raw scraped fields only. summary/summary_generated_at and
@@ -102,6 +114,94 @@ export async function saveSummary(id, summary, category) {
   if (error) {
     console.error('Failed to save summary to Supabase:', error.message);
   }
+}
+
+// Looks up display metadata (title, url, source) for a set of article ids -
+// used to join Moss search hits (which only carry an id and the indexed
+// text) back to the fields the frontend needs to render a citation.
+export async function getArticlesByIds(ids) {
+  if (!dbEnabled || ids.length === 0) return new Map();
+
+  const { data, error } = await supabase
+    .from('articles')
+    .select('id, title, url, source')
+    .in('id', ids);
+
+  if (error) {
+    console.error('Failed to load article metadata from Supabase:', error.message);
+    return new Map();
+  }
+
+  return new Map((data || []).map((row) => [row.id, { title: row.title, url: row.url, source: row.source }]));
+}
+
+export async function saveEmbedding(id, vector) {
+  if (!dbEnabled) return;
+
+  const { error } = await supabase.from('articles').update({ embedding: vector }).eq('id', id);
+
+  if (error) {
+    console.error('Failed to save embedding to Supabase:', error.message);
+  }
+}
+
+// Ids (from the given candidate list) that don't have an embedding yet -
+// used to drive one-time embedding generation, mirroring
+// filterIdsWithoutSummary() above.
+export async function filterIdsWithoutEmbedding(ids) {
+  if (!dbEnabled || ids.length === 0) return ids;
+
+  const { data, error } = await supabase
+    .from('articles')
+    .select('id')
+    .in('id', ids)
+    .not('embedding', 'is', null);
+
+  if (error) {
+    console.error('Failed to check existing embeddings in Supabase:', error.message);
+    return ids;
+  }
+
+  const alreadyEmbedded = new Set((data || []).map((row) => row.id));
+  return ids.filter((id) => !alreadyEmbedded.has(id));
+}
+
+// PostgREST caps any single select at this many rows by default - a plain
+// unbounded select() silently truncates rather than erroring, which is the
+// same cap loadArticlesFromDb() above hits ("Loaded 1000 articles..." at
+// 3000+ rows in the table). getAllArticlesForNaiveSearch() below pages past
+// it rather than fixing this: fetching genuinely every row is the whole
+// point of the "no persistent index" baseline it's used for.
+const NAIVE_FETCH_PAGE_SIZE = 1000;
+
+// A fresh, uncached select of every article's id/title/url/source/embedding -
+// used by the naive retrieval path (server/naive.js) to honestly mirror a
+// setup with no persistent vector index: every hop re-fetches the full table
+// over the network (paginating past PostgREST's row cap if needed) instead
+// of reading from an in-memory/ANN index like Moss.
+export async function getAllArticlesForNaiveSearch() {
+  if (!dbEnabled) return [];
+
+  const rows = [];
+  let from = 0;
+
+  while (true) {
+    const { data, error } = await supabase
+      .from('articles')
+      .select('id,title,url,source,embedding')
+      .range(from, from + NAIVE_FETCH_PAGE_SIZE - 1);
+
+    if (error) {
+      console.error('Failed to load articles for naive search from Supabase:', error.message);
+      break;
+    }
+
+    rows.push(...(data || []));
+    if (!data || data.length < NAIVE_FETCH_PAGE_SIZE) break;
+    from += NAIVE_FETCH_PAGE_SIZE;
+  }
+
+  return rows;
 }
 
 export async function incrementClickCount(id) {

@@ -14,12 +14,43 @@ import {
   getSummary,
   saveSummary,
   filterIdsWithoutSummary,
+  saveEmbedding,
+  filterIdsWithoutEmbedding,
   incrementClickCount
 } from './db.js';
+import { mossEnabled, indexArticles } from './moss.js';
+import { hasAvailableKey, withKeyRotation } from './quota.js';
+import { answerQuestion } from './agent.js';
+import { answerQuestionNaive, EMBEDDING_MODEL } from './naive.js';
+import { AccessToken } from 'livekit-server-sdk';
+import { randomUUID } from 'crypto';
+
+// Background cloud SDKs (Moss's polling connection, Supabase, LiveKit) can
+// emit a socket-level 'error' with no listener attached, which Node treats
+// as an uncaught exception and kills the whole process - observed in
+// practice as a `SocketError: other side closed` on an HTTP/2 connection,
+// unrelated to any in-flight request. Log and keep serving rather than let a
+// transient network blip on a background connection take the whole app down.
+process.on('uncaughtException', (error) => {
+  console.error('Uncaught exception (server staying up):', error);
+});
+process.on('unhandledRejection', (reason) => {
+  console.error('Unhandled rejection (server staying up):', reason);
+});
 
 const CATEGORIES = ['AI', 'Security', 'Hardware', 'Startups/Funding', 'Policy', 'DevTools', 'General'];
 
+// Single shared room the ima-voice-agent worker listens on - dispatched
+// automatically to any room a participant joins, so there's no per-session
+// room-creation step here, just one well-known name both sides agree on.
+const VOICE_ROOM_NAME = 'ima-voice';
+
 dotenv.config();
+
+const livekitEnabled = Boolean(process.env.LIVEKIT_API_KEY && process.env.LIVEKIT_API_SECRET && process.env.LIVEKIT_URL);
+if (!livekitEnabled) {
+  console.warn('Warning: LIVEKIT_URL / LIVEKIT_API_KEY / LIVEKIT_API_SECRET not set - voice mode is disabled.');
+}
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -46,66 +77,38 @@ function cacheSummary(id, summary) {
 }
 
 const TOP_N_TO_AUTO_SUMMARIZE = 5;
+const MAX_EMBEDS_PER_CYCLE = 5;
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-
-// The 429 Gemini returns for this quota is a *daily* limit
-// (GenerateRequestsPerDayPerProjectPerModel-FreeTier), but the retryDelay it
-// reports is only seconds - clearly meant for a per-minute quota, not a
-// per-day one. Retrying every 5-minute ingestion cycle on that advice just
-// burns more of the next window's quota on guaranteed failures. Instead,
-// back off for real once we see a 429, doubling on repeated hits (in case
-// quota was only partially available) up to a few hours, and reset the
-// moment a call actually succeeds.
-const QUOTA_BACKOFF_INITIAL_MS = 15 * 60 * 1000;
-const QUOTA_BACKOFF_MAX_MS = 4 * 60 * 60 * 1000;
-let quotaBackoffMs = 0;
-let quotaBackoffUntil = 0;
-
-function isQuotaBackoffActive() {
-  return Date.now() < quotaBackoffUntil;
-}
-
-function recordQuotaExhaustion() {
-  quotaBackoffMs = quotaBackoffMs ? Math.min(quotaBackoffMs * 2, QUOTA_BACKOFF_MAX_MS) : QUOTA_BACKOFF_INITIAL_MS;
-  quotaBackoffUntil = Date.now() + quotaBackoffMs;
-  console.log(`Gemini quota exhausted - backing off auto-summarization until ${new Date(quotaBackoffUntil).toISOString()}`);
-}
-
-function recordQuotaSuccess() {
-  quotaBackoffMs = 0;
-  quotaBackoffUntil = 0;
-}
 
 // Returns { summary, category } from a single Gemini call - piggybacking
 // category classification onto the summary request rather than a separate
 // call, since every request against the free tier's 20/day quota counts.
+// Routed through withKeyRotation so a 429 on one configured key falls
+// through to the next before the whole call is treated as failed.
 async function generateSummary(article) {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) {
-    throw Object.assign(new Error('GEMINI_API_KEY is missing.'), { status: 500 });
-  }
-
-  const ai = new GoogleGenAI({ apiKey });
   const prompt = `Summarize this news item in 2-3 short, punchy sentences for a busy reader, and classify it into exactly one category.
 
 Title: ${article.title}
 Source: ${article.source}
 Content: ${(article.text || '').slice(0, 4000)}`;
 
-  const response = await ai.models.generateContent({
-    model: 'gemini-3.6-flash',
-    contents: prompt,
-    config: {
-      responseMimeType: 'application/json',
-      responseSchema: {
-        type: Type.OBJECT,
-        properties: {
-          summary: { type: Type.STRING, description: '2-3 short, punchy sentences. Plain text, no preamble, no markdown.' },
-          category: { type: Type.STRING, enum: CATEGORIES }
-        },
-        required: ['summary', 'category']
+  const response = await withKeyRotation((apiKey) => {
+    const ai = new GoogleGenAI({ apiKey });
+    return ai.models.generateContent({
+      model: 'gemini-3.6-flash',
+      contents: prompt,
+      config: {
+        responseMimeType: 'application/json',
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            summary: { type: Type.STRING, description: '2-3 short, punchy sentences. Plain text, no preamble, no markdown.' },
+            category: { type: Type.STRING, enum: CATEGORIES }
+          },
+          required: ['summary', 'category']
+        }
       }
-    }
+    });
   });
 
   try {
@@ -130,8 +133,8 @@ Content: ${(article.text || '').slice(0, 4000)}`;
 async function autoSummarizeTopArticles() {
   if (!dbEnabled) return;
 
-  if (isQuotaBackoffActive()) {
-    console.log(`Skipping auto-summarize - in quota backoff until ${new Date(quotaBackoffUntil).toISOString()}`);
+  if (!hasAvailableKey()) {
+    console.log('Skipping auto-summarize - every configured Gemini key is in quota backoff.');
     return;
   }
 
@@ -148,14 +151,72 @@ async function autoSummarizeTopArticles() {
     try {
       const { summary, category } = await generateSummary(article);
       await saveSummary(id, summary, category);
-      recordQuotaSuccess();
       console.log(`Auto-summarized (${category || 'uncategorized'}): ${article.title}`);
     } catch (error) {
       console.error(`Auto-summarize failed for "${article.title}":`, error.message);
-      if (error.status === 429) {
-        recordQuotaExhaustion();
-        break; // quota exhausted - no point trying the rest
+      // generateSummary() already rotated through every configured key before
+      // surfacing a 429 here, so this means the whole pool is exhausted - no
+      // point trying the rest of this batch.
+      if (error.status === 429) break;
+    }
+
+    await sleep(2000); // stay polite to the free-tier rate limit
+  }
+}
+
+// Embeds an article's title+summary with Gemini for the naive retrieval path
+// (server/naive.js) to do its own cosine-similarity search against, as a
+// fair comparison to Moss's purpose-built indexing. Uses RETRIEVAL_DOCUMENT,
+// the task type meant for content that will be searched over (paired with
+// RETRIEVAL_QUERY on the query side in naive.js).
+async function generateEmbedding(article) {
+  const response = await withKeyRotation((apiKey) => {
+    const ai = new GoogleGenAI({ apiKey });
+    return ai.models.embedContent({
+      model: EMBEDDING_MODEL,
+      contents: `${article.title}\n\n${article.summary || ''}`,
+      config: { taskType: 'RETRIEVAL_DOCUMENT', title: article.title }
+    });
+  });
+
+  return response.embeddings?.[0]?.values || [];
+}
+
+// Embeds summarized articles that don't have an embedding yet, once each,
+// capped at MAX_EMBEDS_PER_CYCLE per cycle - mirrors
+// autoSummarizeTopArticles()'s top-5-per-cycle restraint above so a large
+// backlog (e.g. summaries that existed before the embedding column did)
+// trickles in over several cycles instead of bursting through the free
+// tier's daily quota in one run.
+async function autoEmbedArticles() {
+  if (!dbEnabled) return;
+
+  if (!hasAvailableKey()) {
+    console.log('Skipping auto-embed - every configured Gemini key is in quota backoff.');
+    return;
+  }
+
+  const summarizedIds = currentFeed.filter((a) => a.summary).map((a) => a.id);
+  const idsNeedingEmbedding = (await filterIdsWithoutEmbedding(summarizedIds)).slice(0, MAX_EMBEDS_PER_CYCLE);
+  if (idsNeedingEmbedding.length === 0) return;
+
+  console.log(`Embedding ${idsNeedingEmbedding.length} article(s)...`);
+
+  for (const id of idsNeedingEmbedding) {
+    const article = currentFeed.find((a) => a.id === id);
+    if (!article) continue;
+
+    try {
+      const vector = await generateEmbedding(article);
+      if (vector.length > 0) {
+        await saveEmbedding(id, vector);
+        console.log(`Embedded: ${article.title}`);
       }
+    } catch (error) {
+      console.error(`Embedding failed for "${article.title}":`, error.message);
+      // generateEmbedding() already rotated through every configured key
+      // before surfacing a 429 here, so the whole pool is exhausted.
+      if (error.status === 429) break;
     }
 
     await sleep(2000); // stay polite to the free-tier rate limit
@@ -176,6 +237,7 @@ async function updateFeed() {
     console.log(`Feed update complete. Current feed size: ${currentFeed.length}`);
 
     await upsertArticles(currentFeed);
+    if (mossEnabled) await indexArticles(currentFeed);
 
     // Reload from Supabase so currentFeed picks up any summary already
     // stored for these articles (from a previous cycle's auto-summarize, or
@@ -200,6 +262,8 @@ async function updateFeed() {
       const refreshed = await loadArticlesFromDb();
       if (refreshed.length > 0) currentFeed = refreshed;
     }
+
+    await autoEmbedArticles();
 
     // Cheap (no AI call), so it runs every cycle regardless of dbEnabled -
     // groups same-story coverage across sources for the frontend to collapse.
@@ -266,16 +330,9 @@ app.post('/api/chat', async (req, res) => {
   try {
     const { message, history } = req.body;
 
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) {
-      return res.status(500).json({ error: "GEMINI_API_KEY is missing." });
-    }
-
-    if (isQuotaBackoffActive()) {
+    if (!hasAvailableKey()) {
       return res.status(429).json({ error: "Rate limit reached on the Gemini API free tier. Please wait a bit and try again." });
     }
-
-    const ai = new GoogleGenAI({ apiKey });
 
     const context = currentFeed.slice(0, 10).map(item => `- ${item.title} (${item.source})`).join('\n');
     const systemPrompt = `You are a highly intelligent, concise, and futuristic AI neural assistant for IMA.
@@ -291,15 +348,16 @@ Answer the user's questions strictly based on the news, or just be generally hel
     }
     prompt += `User: ${message}\nAI:`;
 
-    const response = await ai.models.generateContent({
+    const response = await withKeyRotation((apiKey) => {
+      const ai = new GoogleGenAI({ apiKey });
+      return ai.models.generateContent({
         model: 'gemini-3.6-flash',
         contents: prompt
+      });
     });
-    recordQuotaSuccess();
 
     res.json({ response: response.text });
   } catch (error) {
-    if (error.status === 429) recordQuotaExhaustion();
     sendGeminiError(res, error, "Failed to communicate with Neural Link.");
   }
 });
@@ -317,12 +375,11 @@ app.post('/api/summarize', async (req, res) => {
       return res.json({ summary: cached });
     }
 
-    if (isQuotaBackoffActive()) {
+    if (!hasAvailableKey()) {
       return res.status(429).json({ error: "Rate limit reached on the Gemini API free tier. Please wait a bit and try again." });
     }
 
     const { summary, category } = await generateSummary(article);
-    recordQuotaSuccess();
 
     if (dbEnabled) {
       await saveSummary(id, summary, category);
@@ -332,8 +389,72 @@ app.post('/api/summarize', async (req, res) => {
 
     res.json({ summary });
   } catch (error) {
-    if (error.status === 429) recordQuotaExhaustion();
     sendGeminiError(res, error, "Failed to generate summary.");
+  }
+});
+
+// mode 'moss' (default) uses the Moss-indexed retrieval path (agent.js);
+// mode 'naive' uses the DIY Postgres + app-side linear-scan path (naive.js) -
+// same question in, same response shape out, so the two are directly
+// comparable. See naive.js for what "naive" means here: no artificial
+// slowdown, just an honestly-built baseline with no persistent vector index.
+app.post('/api/ask', async (req, res) => {
+  try {
+    const { question, mode } = req.body;
+    if (!question || typeof question !== 'string' || !question.trim()) {
+      return res.status(400).json({ error: "Missing question." });
+    }
+    if (mode !== undefined && mode !== 'moss' && mode !== 'naive') {
+      return res.status(400).json({ error: "Invalid mode. Use 'moss' or 'naive'." });
+    }
+
+    const useNaive = mode === 'naive';
+
+    if (!useNaive && !mossEnabled) {
+      return res.status(503).json({ error: "Semantic search (Moss) is not configured. Set MOSS_PROJECT_ID and MOSS_PROJECT_KEY." });
+    }
+    if (useNaive && !dbEnabled) {
+      return res.status(503).json({ error: "Naive retrieval requires Supabase. Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY." });
+    }
+
+    const result = useNaive
+      ? await answerQuestionNaive(question.trim())
+      : await answerQuestion(question.trim());
+    res.json(result);
+  } catch (error) {
+    // answerQuestion()/answerQuestionNaive() make multiple Gemini calls
+    // internally, each already routed through withKeyRotation() (see
+    // server/quota.js) - a 429 here means every configured key was tried
+    // and exhausted, not just one.
+    sendGeminiError(res, error, "Failed to answer question.");
+  }
+});
+
+// Mints a short-lived LiveKit room token for the Ask bar's mic button. A
+// fresh random identity per request keeps re-joins from colliding with a
+// stale connection under the same identity; the room itself is shared
+// (VOICE_ROOM_NAME) since ima-voice-agent's worker only needs to find it.
+app.get('/api/livekit-token', async (req, res) => {
+  if (!livekitEnabled) {
+    return res.status(503).json({ error: 'Voice mode is not configured. Set LIVEKIT_URL, LIVEKIT_API_KEY, and LIVEKIT_API_SECRET.' });
+  }
+
+  try {
+    const identity = `visitor-${randomUUID()}`;
+    const at = new AccessToken(process.env.LIVEKIT_API_KEY, process.env.LIVEKIT_API_SECRET, { identity, ttl: '10m' });
+    at.addGrant({
+      room: VOICE_ROOM_NAME,
+      roomJoin: true,
+      canPublish: true,
+      canPublishData: true,
+      canSubscribe: true
+    });
+
+    const token = await at.toJwt();
+    res.json({ token, url: process.env.LIVEKIT_URL, room: VOICE_ROOM_NAME, identity });
+  } catch (error) {
+    console.error('Failed to mint LiveKit token:', error);
+    res.status(500).json({ error: 'Failed to mint LiveKit token.' });
   }
 });
 
