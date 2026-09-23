@@ -171,21 +171,34 @@ export async function queryPgvectorIndex(queryVector, matchCount) {
 // Ids (from the given candidate list) that don't have an embedding yet -
 // used to drive one-time embedding generation, mirroring
 // filterIdsWithoutSummary() above.
+//
+// Chunked (unlike filterIdsWithoutSummary, which only ever sees a handful of
+// top-N ids) because this candidate list is every summarized article - as
+// that grows into the hundreds, a single `.in('id', ids)` GET request's query
+// string grows past Supabase's URL length limit and 400s outright.
+const FILTER_CHUNK_SIZE = 150;
+
 export async function filterIdsWithoutEmbedding(ids) {
   if (!dbEnabled || ids.length === 0) return ids;
 
-  const { data, error } = await supabase
-    .from('articles')
-    .select('id')
-    .in('id', ids)
-    .not('embedding', 'is', null);
+  const alreadyEmbedded = new Set();
 
-  if (error) {
-    console.error('Failed to check existing embeddings in Supabase:', error.message);
-    return ids;
+  for (let i = 0; i < ids.length; i += FILTER_CHUNK_SIZE) {
+    const chunk = ids.slice(i, i + FILTER_CHUNK_SIZE);
+    const { data, error } = await supabase
+      .from('articles')
+      .select('id')
+      .in('id', chunk)
+      .not('embedding', 'is', null);
+
+    if (error) {
+      console.error('Failed to check existing embeddings in Supabase:', error.message);
+      continue;
+    }
+
+    for (const row of data || []) alreadyEmbedded.add(row.id);
   }
 
-  const alreadyEmbedded = new Set((data || []).map((row) => row.id));
   return ids.filter((id) => !alreadyEmbedded.has(id));
 }
 

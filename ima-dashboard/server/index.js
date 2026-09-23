@@ -21,13 +21,11 @@ import {
 import { hasAvailableKey, withKeyRotation } from './quota.js';
 import { answerQuestion } from './pgvector.js';
 import { answerQuestionNaive } from './naive.js';
-import { EMBEDDING_MODEL } from './lib/embedQuery.js';
-import { AccessToken } from 'livekit-server-sdk';
-import { randomUUID } from 'crypto';
+import { embedText } from './lib/embedQuery.js';
 
-// Background cloud SDKs (Supabase, LiveKit) can emit a socket-level 'error'
-// with no listener attached, which Node treats as an uncaught exception and
-// kills the whole process - observed in
+// Background cloud SDKs (Supabase) can emit a socket-level 'error' with no
+// listener attached, which Node treats as an uncaught exception and kills
+// the whole process - observed in
 // practice as a `SocketError: other side closed` on an HTTP/2 connection,
 // unrelated to any in-flight request. Log and keep serving rather than let a
 // transient network blip on a background connection take the whole app down.
@@ -164,22 +162,20 @@ async function autoSummarizeTopArticles() {
   }
 }
 
-// Embeds an article's title+summary with Gemini for the naive retrieval path
-// (server/naive.js) to do its own cosine-similarity search against, as a
-// fair comparison to pgvector.js's indexed ANN search. Uses RETRIEVAL_DOCUMENT,
-// the task type meant for content that will be searched over (paired with
-// RETRIEVAL_QUERY on the query side in naive.js).
+// Embeds an article's title+summary with Gemini - shared by both retrieval
+// paths (server/naive.js's own cosine-similarity scan and pgvector.js's
+// indexed ANN search) via embedText(), so document-side embeddings use the
+// exact same model and dimensionality as query-side embedding. A mismatch
+// here (e.g. omitting the 768-dim config) breaks cosine similarity and, for
+// pgvector, is rejected outright by the vector(768) column. Uses
+// RETRIEVAL_DOCUMENT, the task type meant for content that will be searched
+// over (paired with RETRIEVAL_QUERY on the query side).
 async function generateEmbedding(article) {
-  const response = await withKeyRotation((apiKey) => {
-    const ai = new GoogleGenAI({ apiKey });
-    return ai.models.embedContent({
-      model: EMBEDDING_MODEL,
-      contents: `${article.title}\n\n${article.summary || ''}`,
-      config: { taskType: 'RETRIEVAL_DOCUMENT', title: article.title }
-    });
-  });
-
-  return response.embeddings?.[0]?.values || [];
+  return embedText(
+    (apiKey) => new GoogleGenAI({ apiKey }),
+    `${article.title}\n\n${article.summary || ''}`,
+    { taskType: 'RETRIEVAL_DOCUMENT', title: article.title }
+  );
 }
 
 // Embeds summarized articles that don't have an embedding yet, once each,
