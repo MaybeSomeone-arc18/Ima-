@@ -38,17 +38,7 @@ process.on('unhandledRejection', (reason) => {
 
 const CATEGORIES = ['AI', 'Security', 'Hardware', 'Startups/Funding', 'Policy', 'DevTools', 'General'];
 
-// Single shared room the ima-voice-agent worker listens on - dispatched
-// automatically to any room a participant joins, so there's no per-session
-// room-creation step here, just one well-known name both sides agree on.
-const VOICE_ROOM_NAME = 'ima-voice';
-
 dotenv.config();
-
-const livekitEnabled = Boolean(process.env.LIVEKIT_API_KEY && process.env.LIVEKIT_API_SECRET && process.env.LIVEKIT_URL);
-if (!livekitEnabled) {
-  console.warn('Warning: LIVEKIT_URL / LIVEKIT_API_KEY / LIVEKIT_API_SECRET not set - voice mode is disabled.');
-}
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -419,34 +409,6 @@ app.post('/api/ask', async (req, res) => {
     // server/quota.js) - a 429 here means every configured key was tried
     // and exhausted, not just one.
     sendGeminiError(res, error, "Failed to answer question.");
-  }
-});
-
-// Mints a short-lived LiveKit room token for the Ask bar's mic button. A
-// fresh random identity per request keeps re-joins from colliding with a
-// stale connection under the same identity; the room itself is shared
-// (VOICE_ROOM_NAME) since ima-voice-agent's worker only needs to find it.
-app.get('/api/livekit-token', async (req, res) => {
-  if (!livekitEnabled) {
-    return res.status(503).json({ error: 'Voice mode is not configured. Set LIVEKIT_URL, LIVEKIT_API_KEY, and LIVEKIT_API_SECRET.' });
-  }
-
-  try {
-    const identity = `visitor-${randomUUID()}`;
-    const at = new AccessToken(process.env.LIVEKIT_API_KEY, process.env.LIVEKIT_API_SECRET, { identity, ttl: '10m' });
-    at.addGrant({
-      room: VOICE_ROOM_NAME,
-      roomJoin: true,
-      canPublish: true,
-      canPublishData: true,
-      canSubscribe: true
-    });
-
-    const token = await at.toJwt();
-    res.json({ token, url: process.env.LIVEKIT_URL, room: VOICE_ROOM_NAME, identity });
-  } catch (error) {
-    console.error('Failed to mint LiveKit token:', error);
-    res.status(500).json({ error: 'Failed to mint LiveKit token.' });
   }
 });
 

@@ -1,7 +1,6 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Zap, X, Send, Mic, MicOff } from 'lucide-react';
-import { Room, RoomEvent, Track } from 'livekit-client';
+import { Zap, X, Send } from 'lucide-react';
 import { getApiBaseUrl } from './lib/api';
 import { LatencyHUD } from './LatencyHUD';
 
@@ -12,17 +11,6 @@ const MODES = [
   { key: 'pgvector', label: 'Indexed', accent: '#E60033' },
   { key: 'naive', label: 'Naive', accent: '#3C3CFF' }
 ];
-
-// Green, distinct from both text modes above - this HUD is driven by
-// ima-voice-agent's data messages, not a fetch response, so it gets its own
-// identity to signal "this one's live" at a glance.
-const VOICE_ACCENT = '#22C55E';
-
-const VOICE_STATUS_LABEL = {
-  connecting: 'Connecting...',
-  connected: 'Listening - ask a question',
-  error: 'Voice connection failed'
-};
 
 function AnswerPanel({ result, accent, label, isRefreshing }) {
   return (
@@ -77,85 +65,7 @@ export default function AskBar() {
   const [loadingMode, setLoadingMode] = useState(null);
   const [error, setError] = useState(null);
 
-  const [voiceStatus, setVoiceStatus] = useState('idle'); // idle | connecting | connected | error
-  const [voiceError, setVoiceError] = useState(null);
-  const [voiceResult, setVoiceResult] = useState(null);
-  const roomRef = useRef(null);
-  const audioContainerRef = useRef(null);
-
   const hasAnyResult = Boolean(resultsByMode.pgvector || resultsByMode.naive);
-
-  // Tears down the room and any attached remote audio elements on unmount,
-  // in case the panel closes (or the whole app unmounts) mid-call.
-  useEffect(() => {
-    return () => {
-      roomRef.current?.disconnect();
-    };
-  }, []);
-
-  const disconnectVoice = () => {
-    roomRef.current?.disconnect();
-    roomRef.current = null;
-    if (audioContainerRef.current) audioContainerRef.current.innerHTML = '';
-    setVoiceStatus('idle');
-    setVoiceResult(null);
-  };
-
-  const connectVoice = async () => {
-    setVoiceError(null);
-    setVoiceStatus('connecting');
-
-    try {
-      const response = await fetch(`${getApiBaseUrl()}/api/livekit-token`);
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || 'Failed to get a voice token.');
-
-      const room = new Room();
-
-      room.on(RoomEvent.DataReceived, (payload) => {
-        try {
-          const message = JSON.parse(new TextDecoder().decode(payload));
-          if (message.type === 'latency_hud') setVoiceResult(message);
-        } catch {
-          // Ignore malformed/unrelated data packets rather than dropping the call over it.
-        }
-      });
-
-      room.on(RoomEvent.TrackSubscribed, (track) => {
-        if (track.kind === Track.Kind.Audio) {
-          const el = track.attach();
-          audioContainerRef.current?.appendChild(el);
-        }
-      });
-
-      room.on(RoomEvent.TrackUnsubscribed, (track) => track.detach().forEach((el) => el.remove()));
-
-      room.on(RoomEvent.Disconnected, () => {
-        roomRef.current = null;
-        setVoiceStatus('idle');
-        setVoiceResult(null);
-      });
-
-      await room.connect(data.url, data.token);
-      await room.localParticipant.setMicrophoneEnabled(true);
-
-      roomRef.current = room;
-      setVoiceStatus('connected');
-    } catch (err) {
-      setVoiceError(err.message || 'Failed to connect to the voice agent.');
-      setVoiceStatus('error');
-      roomRef.current?.disconnect();
-      roomRef.current = null;
-    }
-  };
-
-  const toggleVoice = () => {
-    if (voiceStatus === 'connected' || voiceStatus === 'connecting') {
-      disconnectVoice();
-    } else {
-      connectVoice();
-    }
-  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -246,31 +156,7 @@ export default function AskBar() {
                 <p className="text-xs text-red-400 font-mono">{error}</p>
               )}
 
-              {voiceStatus !== 'idle' && (
-                <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-5 space-y-3">
-                  <div className="flex items-center gap-2">
-                    <span
-                      className={`w-2 h-2 rounded-full ${voiceStatus === 'connected' ? 'animate-pulse' : ''}`}
-                      style={{ backgroundColor: voiceStatus === 'error' ? '#ef4444' : VOICE_ACCENT }}
-                    />
-                    <span className="text-[11px] font-mono uppercase tracking-widest text-white/40">
-                      {voiceError || VOICE_STATUS_LABEL[voiceStatus] || voiceStatus}
-                    </span>
-                  </div>
-                  {voiceResult && (
-                    <LatencyHUD
-                      label="Voice"
-                      retrievals={voiceResult.retrievals}
-                      totalRetrievalMs={voiceResult.totalRetrievalMs}
-                      totalLlmMs={voiceResult.totalLlmMs}
-                      totalMs={voiceResult.totalMs}
-                      accent={VOICE_ACCENT}
-                    />
-                  )}
-                </div>
-              )}
-
-              {!hasAnyResult && voiceStatus === 'idle' && !error && !loadingMode && (
+              {!hasAnyResult && !error && !loadingMode && (
                 <p className="text-xs text-white/30 font-mono text-center py-10">
                   Ask a question about the live feed. Run it in both Indexed and Naive mode to compare retrieval speed side by side.
                 </p>
@@ -313,19 +199,8 @@ export default function AskBar() {
                   onChange={(e) => setQuestion(e.target.value)}
                   placeholder={`Ask in ${MODES.find((m) => m.key === mode)?.label} mode...`}
                   disabled={Boolean(loadingMode)}
-                  className="w-full bg-white/5 border border-white/10 rounded-full py-3 pl-5 pr-20 text-sm text-white placeholder-white/30 focus:outline-none focus:border-white/20 transition-colors disabled:opacity-50"
+                  className="w-full bg-white/5 border border-white/10 rounded-full py-3 pl-5 pr-14 text-sm text-white placeholder-white/30 focus:outline-none focus:border-white/20 transition-colors disabled:opacity-50"
                 />
-                <button
-                  type="button"
-                  onClick={toggleVoice}
-                  disabled={voiceStatus === 'connecting'}
-                  aria-label={voiceStatus === 'connected' ? 'End voice call' : 'Start voice call'}
-                  title={voiceStatus === 'connected' ? 'End voice call' : 'Ask by voice'}
-                  className="absolute right-11 p-2 transition-colors disabled:opacity-50"
-                  style={{ color: voiceStatus === 'connected' ? VOICE_ACCENT : 'rgba(255,255,255,0.5)' }}
-                >
-                  {voiceStatus === 'connected' ? <MicOff size={18} /> : <Mic size={18} />}
-                </button>
                 <button
                   type="submit"
                   disabled={!question.trim() || Boolean(loadingMode)}
@@ -335,11 +210,6 @@ export default function AskBar() {
                 </button>
               </div>
             </form>
-
-            {/* Off-screen sink for the agent's subscribed audio track - not
-                rendered visibly, just needs to exist in the DOM for
-                track.attach() to play through it. */}
-            <div ref={audioContainerRef} className="hidden" />
           </motion.div>
         )}
       </AnimatePresence>
