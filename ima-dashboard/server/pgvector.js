@@ -1,7 +1,8 @@
 import { GoogleGenAI } from '@google/genai';
-import { getArticlesByIds, queryPgvectorIndex } from './db.js';
+import { getArticlesByIds, queryPgvectorIndex, searchArticlesByTitle } from './db.js';
 import { runAnswerPipeline } from './lib/qaPipeline.js';
 import { embedText } from './lib/embedQuery.js';
+import { hasAvailableKey } from './quota.js';
 
 const PGVECTOR_TOP_K = 5;
 
@@ -15,11 +16,19 @@ export async function answerQuestion(question, deps = {}) {
   const {
     createAiClient = (apiKey) => new GoogleGenAI({ apiKey }),
     lookupArticles = getArticlesByIds,
-    queryIndex = queryPgvectorIndex
+    queryIndex = queryPgvectorIndex,
+    fallbackSearch = searchArticlesByTitle
   } = deps;
 
   const retrieve = async (query, createAiClientFn) => {
-    const queryVector = await embedText(createAiClientFn, query, { taskType: 'RETRIEVAL_QUERY' });
+    if (!hasAvailableKey()) return fallbackSearch(query, PGVECTOR_TOP_K);
+    let queryVector;
+    try {
+      queryVector = await embedText(createAiClientFn, query, { taskType: 'RETRIEVAL_QUERY' });
+    } catch (error) {
+      if (error.status !== 429) throw error;
+      return fallbackSearch(query, PGVECTOR_TOP_K);
+    }
     if (queryVector.length === 0) return [];
 
     const rows = await queryIndex(queryVector, PGVECTOR_TOP_K);
