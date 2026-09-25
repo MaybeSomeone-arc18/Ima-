@@ -85,13 +85,20 @@ export function quotaExceededError() {
   );
 }
 
-// Calls fn(apiKey) once per available key, starting from the round-robin
-// position, until one succeeds. A 429 marks that key backed off and moves on
-// to the next available key; any other error (or exhaustion of every key)
-// propagates to the caller. fn must throw an error shaped like @google/genai's
-// (a `status` field) for a quota rejection to be recognized as one - anything
-// else is assumed to not be a quota problem and isn't retried on another key.
-export async function withKeyRotation(fn) {
+// Keep the model list overrideable without changing the embedding model.
+// Gemini 2.5 Flash is a stable text model listed by Google's model catalog.
+export function generationModels() {
+  return (process.env.GEMINI_GENERATION_MODELS || 'gemini-3.6-flash,gemini-2.5-flash')
+    .split(',').map((model) => model.trim()).filter(Boolean);
+}
+
+const TRANSIENT_ATTEMPTS = 3;
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// A 429 means the key is quota-backed-off and must not be retried immediately.
+// A 503 is transient: retry briefly, then try the next available key. Only
+// generation calls opt into model fallback; embeddings keep their fixed model.
+export async function withKeyRotation(fn, { models = [undefined] } = {}) {
   const keys = getKeys();
   if (keys.length === 0) {
     throw Object.assign(new Error('GEMINI_API_KEY(S) is missing.'), { status: 500 });
@@ -103,24 +110,34 @@ export async function withKeyRotation(fn) {
   nextIndex = (nextIndex + 1) % keys.length;
 
   let lastError;
-  for (const i of order) {
-    const key = keys[i];
-    if (!isAvailable(key)) continue;
+  for (const model of models) {
+    let sawTransient = false;
+    for (const i of order) {
+      const key = keys[i];
+      if (!isAvailable(key)) continue;
 
-    try {
-      const result = await fn(key);
-      recordSuccess(key);
-      return result;
-    } catch (error) {
-      lastError = error;
-      if (error.status === 429) {
-        recordExhaustion(key, keys);
-        continue; // try the next available key
+      for (let attempt = 0; attempt < TRANSIENT_ATTEMPTS; attempt += 1) {
+        try {
+          const result = await fn(key, model);
+          recordSuccess(key);
+          return result;
+        } catch (error) {
+          lastError = error;
+          if (error.status === 429) {
+            recordExhaustion(key, keys);
+            break; // immediately try another key, without retrying its quota
+          }
+          if (error.status !== 503) throw error;
+          sawTransient = true;
+          if (attempt < TRANSIENT_ATTEMPTS - 1) {
+            await sleep((1000 * 2 ** attempt) + Math.floor(Math.random() * 250));
+          }
+        }
       }
-      throw error; // not a quota error - not a reason to burn through the rest of the pool
     }
+    // Fallback is for unavailable model capacity, not depleted daily quota.
+    if (!sawTransient) break;
   }
 
-  // Every key was either backed off already or just got exhausted above.
   throw (lastError && lastError.status === 429) || !lastError ? quotaExceededError() : lastError;
 }
