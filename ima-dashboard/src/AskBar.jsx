@@ -12,6 +12,24 @@ const MODES = [
   { key: 'naive', label: 'Naive', accent: '#3C3CFF' }
 ];
 
+// Render the small markdown subset the answer service emits without injecting HTML.
+// Some models flatten bullet newlines into " - ", so restore list spacing.
+function AnswerText({ text }) {
+  const parts = String(text || '').trim().split(/(?:^|\n)\s*[-*]\s+|\s+-\s+(?=[A-Z])/).filter(Boolean);
+  const hasBullets = /^[-*]\s+/.test(String(text || '').trim()) || parts.length > 1;
+  const bold = (line) => line.split(/(\*\*[^*]+\*\*)/g).map((chunk, index) =>
+    chunk.startsWith('**') && chunk.endsWith('**')
+      ? <strong key={index} className="font-semibold text-white">{chunk.slice(2, -2)}</strong>
+      : chunk
+  );
+  if (hasBullets) return (
+    <ul className="list-disc pl-5 space-y-2 text-sm leading-relaxed text-white/85">
+      {parts.map((part, index) => <li key={index}>{bold(part.trim())}</li>)}
+    </ul>
+  );
+  return <p className="whitespace-pre-line text-sm leading-relaxed text-white/85">{bold(String(text || ''))}</p>;
+}
+
 function AnswerPanel({ result, accent, label, isRefreshing }) {
   return (
     <div className="space-y-3">
@@ -34,7 +52,7 @@ function AnswerPanel({ result, accent, label, isRefreshing }) {
         )}
       </div>
 
-      <p className="text-sm leading-relaxed text-white/85">{result.answer}</p>
+      <AnswerText text={result.answer} />
 
       {result.citations?.length > 0 && (
         <div className="flex flex-wrap gap-1.5">
