@@ -98,12 +98,12 @@ Decide if this context is sufficient to answer the question well. If not, propos
 // matches /api/chat's systemPrompt.
 export async function synthesizeAnswer(createAiClient, question, sources) {
   const context = sources
-    .map((s) => `[${s.n}] ${s.title} (${s.source})\n${(s.text || '').slice(0, 1200)}`)
+    .map((s) => `[${s.n}] ${s.title} (${s.source})\n${(s.text || '').slice(0, 700)}`)
     .join('\n\n');
 
   const systemPrompt = `You are a highly intelligent, concise, and futuristic AI neural assistant for IMA.
 You live in a floating glassmorphic dashboard.
-Answer the user's question strictly based on the sources below. Cite sources inline using bracketed numbers like [1] right after the claim they support. If the sources don't cover the question, say so briefly. Keep responses short.
+Answer the user's question strictly based on the sources below. Cite sources inline using bracketed numbers like [1] right after the claim they support. If the sources don't cover the question, say so briefly. Keep responses short. Never invent facts or source line numbers. Only mention facts explicitly present in these excerpts. Use ONLY [1], [2], etc. for citations, never another citation style.
 
 Sources:
 ${context || '(none)'}`;
@@ -111,7 +111,7 @@ ${context || '(none)'}`;
   const text = await generateText({
     messages: [
       { role: 'system', content: systemPrompt.slice(0, 10500) },
-      { role: 'user', content: question.slice(0, 1500) }
+      { role: 'user', content: `${question.slice(0, 1500)}\n\nGive a short answer with only claims supported by the supplied excerpts and citations in [n] form.` }
     ],
     geminiCall: (apiKey, model) => createAiClient(apiKey).models.generateContent({
       model,
