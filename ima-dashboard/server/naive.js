@@ -1,7 +1,8 @@
 import { GoogleGenAI } from '@google/genai';
-import { getAllArticlesForNaiveSearch, getArticlesByIds } from './db.js';
+import { getAllArticlesForNaiveSearch, getArticlesByIds, searchArticlesByTitle } from './db.js';
 import { runAnswerPipeline } from './lib/qaPipeline.js';
 import { embedText } from './lib/embedQuery.js';
+import { hasAvailableKey } from './quota.js';
 
 const NAIVE_TOP_K = 5;
 
@@ -30,12 +31,18 @@ function cosineSimilarity(a, b) {
 // artificial slowdowns), which is exactly the comparison worth making
 // against pgvector.js's HNSW-indexed retrieval - same embedding step, only
 // the search itself (linear scan vs. an index) differs.
-async function retrieveNaive(query, createAiClient, fetchArticles) {
-  const articles = await fetchArticles();
-
-  const queryVector = await embedText(createAiClient, query, { taskType: 'RETRIEVAL_QUERY' });
+async function retrieveNaive(query, createAiClient, fetchArticles, fallbackSearch) {
+  if (!hasAvailableKey()) return fallbackSearch(query, NAIVE_TOP_K);
+  let queryVector;
+  try {
+    queryVector = await embedText(createAiClient, query, { taskType: 'RETRIEVAL_QUERY' });
+  } catch (error) {
+    if (error.status !== 429) throw error;
+    return fallbackSearch(query, NAIVE_TOP_K);
+  }
   if (queryVector.length === 0) return [];
 
+  const articles = await fetchArticles();
   const scored = [];
   for (const article of articles) {
     if (!Array.isArray(article.embedding) || article.embedding.length === 0) continue;
@@ -57,10 +64,11 @@ export async function answerQuestionNaive(question, deps = {}) {
   const {
     createAiClient = (apiKey) => new GoogleGenAI({ apiKey }),
     lookupArticles = getArticlesByIds,
-    fetchArticles = getAllArticlesForNaiveSearch
+    fetchArticles = getAllArticlesForNaiveSearch,
+    fallbackSearch = searchArticlesByTitle
   } = deps;
 
-  const retrieve = (query, createAiClientFn) => retrieveNaive(query, createAiClientFn, fetchArticles);
+  const retrieve = (query, createAiClientFn) => retrieveNaive(query, createAiClientFn, fetchArticles, fallbackSearch);
 
   return runAnswerPipeline(question, { retrieve, createAiClient, lookupArticles });
 }
