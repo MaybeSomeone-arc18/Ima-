@@ -15,7 +15,7 @@ async function groqText(messages, json) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 20000);
   try {
-    const response = await fetch(GROQ_URL, {
+    const request = async (jsonMode) => fetch(GROQ_URL, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${process.env.GROQ_API_KEY}`,
@@ -24,12 +24,19 @@ async function groqText(messages, json) {
       body: JSON.stringify({
         model: GROQ_MODEL,
         messages: messages.map(({ role, content }) => ({ role, content: String(content).slice(0, MAX_GROQ_CONTEXT_CHARS) })),
-        max_completion_tokens: json ? 320 : 600,
-        ...(json ? { response_format: { type: 'json_object' } } : {})
+        max_completion_tokens: json ? 900 : 600,
+        ...(jsonMode ? { response_format: { type: 'json_object' } } : {})
       }),
       signal: controller.signal
     });
-    if (!response.ok) throw Object.assign(new Error(`Groq returned HTTP ${response.status}`), { status: response.status });
+    let response = await request(json);
+    // JSON Object Mode can itself return 400 on an otherwise valid prompt.
+    // A plain-text retry retains the explicit JSON instructions in messages.
+    if (json && response.status === 400) response = await request(false);
+    if (!response.ok) {
+      // Do not log upstream response bodies: they may echo private prompts.
+      throw Object.assign(new Error(`Groq returned HTTP ${response.status}`), { status: response.status });
+    }
     const data = await response.json();
     const text = data.choices?.[0]?.message?.content;
     if (!text || !text.trim()) throw new Error('Groq returned an empty answer.');
