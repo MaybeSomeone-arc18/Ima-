@@ -1,5 +1,5 @@
 import { Type } from '@google/genai';
-import { withKeyRotation } from '../quota.js';
+import { generationModels, withKeyRotation } from '../quota.js';
 
 export const MAX_HOPS = 5;
 export const MAX_SUBQUERIES = 3;
@@ -11,7 +11,7 @@ export const MAX_UNIQUE_SOURCES = 8;
 // only shows up as extra latency, never as a failed hop.
 async function timeRotatedCall(fn) {
   const start = performance.now();
-  const result = await withKeyRotation(fn);
+  const result = await withKeyRotation(fn, { models: generationModels() });
   return { result, ms: performance.now() - start };
 }
 
@@ -39,7 +39,7 @@ async function runRetrievalHop(retrieve, createAiClient, query, hop, retrievals)
 // Asks Gemini whether the hits retrieved so far are enough to answer the
 // question, and if not, for up to MAX_SUBQUERIES follow-up searches to fill
 // the gaps. Mirrors generateSummary()'s use of a JSON responseSchema.
-export async function planNextHops(ai, question, hitsSoFar) {
+export async function planNextHops(ai, question, hitsSoFar, model = generationModels()[0]) {
   const context = hitsSoFar
     .slice(0, 5)
     .map((hit, i) => `[${i + 1}] ${(hit.text || '').slice(0, 500)}`)
@@ -55,7 +55,7 @@ ${context || '(none)'}
 Decide if this context is sufficient to answer the question well. If not, propose up to ${MAX_SUBQUERIES} focused follow-up search queries that would help fill in what's missing (specific entities, related events, or angles not yet covered). Keep sub-queries short and search-engine-like, not full sentences.`;
 
   const response = await ai.models.generateContent({
-    model: 'gemini-3.6-flash',
+    model,
     contents: prompt,
     config: {
       responseMimeType: 'application/json',
@@ -91,7 +91,7 @@ Decide if this context is sufficient to answer the question well. If not, propos
 
 // Final grounded answer, citing sources inline as "[1]", "[2]", etc. Tone
 // matches /api/chat's systemPrompt.
-export async function synthesizeAnswer(ai, question, sources) {
+export async function synthesizeAnswer(ai, question, sources, model = generationModels()[0]) {
   const context = sources
     .map((s) => `[${s.n}] ${s.title} (${s.source})\n${(s.text || '').slice(0, 1200)}`)
     .join('\n\n');
@@ -104,7 +104,7 @@ Sources:
 ${context || '(none)'}`;
 
   const response = await ai.models.generateContent({
-    model: 'gemini-3.6-flash',
+    model,
     contents: `${systemPrompt}\n\nUser: ${question}\nAI:`
   });
 
@@ -133,8 +133,8 @@ export async function runAnswerPipeline(question, { retrieve, createAiClient, lo
   // Hop 1: the raw question.
   allHits.push(...(await runRetrievalHop(retrieve, createAiClient, question, 1, retrievals)));
 
-  const { result: plan, ms: planMs } = await timeRotatedCall((apiKey) =>
-    planNextHops(createAiClient(apiKey), question, allHits)
+  const { result: plan, ms: planMs } = await timeRotatedCall((apiKey, model) =>
+    planNextHops(createAiClient(apiKey), question, allHits, model)
   );
   totalLlmMs += planMs;
 
@@ -173,8 +173,8 @@ export async function runAnswerPipeline(question, { retrieve, createAiClient, lo
     };
   });
 
-  const { result: answer, ms: answerMs } = await timeRotatedCall((apiKey) =>
-    synthesizeAnswer(createAiClient(apiKey), question, sources)
+  const { result: answer, ms: answerMs } = await timeRotatedCall((apiKey, model) =>
+    synthesizeAnswer(createAiClient(apiKey), question, sources, model)
   );
   totalLlmMs += answerMs;
 
