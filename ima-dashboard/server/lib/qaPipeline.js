@@ -118,7 +118,12 @@ ${context || '(none)'}`;
       contents: `${systemPrompt}\n\nUser: ${question}\nAI:`
     })
   });
-  return text.trim();
+  // Groq may render references as 【1】 or  despite the prompt.
+  // Normalize only citation numbers present in the retrieved source list.
+  const validNumbers = new Set(sources.map((source) => source.n));
+  return text.trim().replace(/【(\d+)(?:†[^】]*)?】/g, (full, number) =>
+    validNumbers.has(Number(number)) ? `[${number}]` : ''
+  );
 }
 
 // Multi-hop retrieval-augmented answer pipeline, shared by every retrieval
