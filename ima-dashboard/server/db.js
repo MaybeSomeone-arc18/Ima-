@@ -135,6 +135,27 @@ export async function getArticlesByIds(ids) {
   return new Map((data || []).map((row) => [row.id, { title: row.title, url: row.url, source: row.source }]));
 }
 
+// When Gemini's query-embedding quota is exhausted, still retrieve real
+// article records for a cited answer. This is a lexical fallback, not a
+// substitute for the pgvector benchmark when embeddings are available.
+export async function searchArticlesByTitle(question, limit = 5) {
+  if (!dbEnabled) return [];
+  const words = [...new Set((question.toLowerCase().match(/[a-z0-9]{4,}/g) || [])
+    .filter((word) => !['what', 'which', 'about', 'from', 'recent', 'news', 'tell', 'latest', 'technology', 'there', 'could', 'would', 'have', 'with', 'this', 'that'].includes(word)))].slice(0, 4);
+  const find = async (term) => {
+    const query = supabase.from('articles').select('id,title,url,source,text,pub_date')
+      .order('pub_date', { ascending: false }).limit(limit);
+    const { data, error } = await (term ? query.ilike('title', `%${term}%`) : query);
+    if (error) throw error;
+    return data || [];
+  };
+  for (const word of words) {
+    const rows = await find(word);
+    if (rows.length) return rows.map((row) => ({ id: row.id, text: row.text || row.title, score: 0.5 }));
+  }
+  return (await find()).map((row) => ({ id: row.id, text: row.text || row.title, score: 0.1 }));
+}
+
 // `embedding` is a pgvector column, not jsonb - sent as a bracketed string
 // ("[0.1,0.2,...]") rather than a raw JS array, since that's pgvector's text
 // input format and PostgREST has no JSON->vector cast to fall back on.
