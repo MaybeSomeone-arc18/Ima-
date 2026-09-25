@@ -18,7 +18,7 @@ import {
   filterIdsWithoutEmbedding,
   incrementClickCount
 } from './db.js';
-import { hasAvailableKey, withKeyRotation } from './quota.js';
+import { generationModels, hasAvailableKey, withKeyRotation } from './quota.js';
 import { answerQuestion } from './pgvector.js';
 import { answerQuestionNaive } from './naive.js';
 import { embedText } from './lib/embedQuery.js';
@@ -80,10 +80,10 @@ Title: ${article.title}
 Source: ${article.source}
 Content: ${(article.text || '').slice(0, 4000)}`;
 
-  const response = await withKeyRotation((apiKey) => {
+  const response = await withKeyRotation((apiKey, model) => {
     const ai = new GoogleGenAI({ apiKey });
     return ai.models.generateContent({
-      model: 'gemini-3.6-flash',
+      model,
       contents: prompt,
       config: {
         responseMimeType: 'application/json',
@@ -97,7 +97,7 @@ Content: ${(article.text || '').slice(0, 4000)}`;
         }
       }
     });
-  });
+  }, { models: generationModels() });
 
   try {
     const parsed = JSON.parse(response.text || '{}');
@@ -333,13 +333,13 @@ Answer the user's questions strictly based on the news, or just be generally hel
     }
     prompt += `User: ${message}\nAI:`;
 
-    const response = await withKeyRotation((apiKey) => {
+    const response = await withKeyRotation((apiKey, model) => {
       const ai = new GoogleGenAI({ apiKey });
       return ai.models.generateContent({
-        model: 'gemini-3.6-flash',
+        model,
         contents: prompt
       });
-    });
+    }, { models: generationModels() });
 
     res.json({ response: response.text });
   } catch (error) {
