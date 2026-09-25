@@ -22,6 +22,7 @@ import { generationModels, hasAvailableKey, withKeyRotation } from './quota.js';
 import { answerQuestion } from './pgvector.js';
 import { answerQuestionNaive } from './naive.js';
 import { embedText } from './lib/embedQuery.js';
+import { generateText } from './lib/generation.js';
 
 // Background cloud SDKs (Supabase) can emit a socket-level 'error' with no
 // listener attached, which Node treats as an uncaught exception and kills
@@ -315,10 +316,6 @@ app.post('/api/chat', async (req, res) => {
   try {
     const { message, history } = req.body;
 
-    if (!hasAvailableKey()) {
-      return res.status(429).json({ error: "Rate limit reached on the Gemini API free tier. Please wait a bit and try again." });
-    }
-
     const context = currentFeed.slice(0, 10).map(item => `- ${item.title} (${item.source})`).join('\n');
     const systemPrompt = `You are a highly intelligent, concise, and futuristic AI neural assistant for IMA.
 You live in a floating glassmorphic dashboard.
@@ -326,22 +323,29 @@ Here are the current top 10 news headlines in the system right now:\n${context}\
 Answer the user's questions strictly based on the news, or just be generally helpful and concise. Keep responses short.`;
 
     let prompt = `${systemPrompt}\n\n`;
-    if (history && history.length > 0) {
-      history.forEach(msg => {
+    if (Array.isArray(history) && history.length > 0) {
+      history.slice(-8).forEach(msg => {
         prompt += `${msg.role === 'user' ? 'User' : 'AI'}: ${msg.content}\n`;
       });
     }
     prompt += `User: ${message}\nAI:`;
 
-    const response = await withKeyRotation((apiKey, model) => {
-      const ai = new GoogleGenAI({ apiKey });
-      return ai.models.generateContent({
-        model,
-        contents: prompt
-      });
-    }, { models: generationModels() });
+    const response = await generateText({
+      messages: [
+        { role: 'system', content: systemPrompt },
+        ...((Array.isArray(history) ? history : []).slice(-8).map((msg) => ({
+          role: msg.role === 'user' ? 'user' : 'assistant',
+          content: String(msg.content || '').slice(0, 1000)
+        }))),
+        { role: 'user', content: String(message || '').slice(0, 2000) }
+      ],
+      geminiCall: (apiKey, model) => {
+        const ai = new GoogleGenAI({ apiKey });
+        return ai.models.generateContent({ model, contents: prompt });
+      }
+    });
 
-    res.json({ response: response.text });
+    res.json({ response });
   } catch (error) {
     sendGeminiError(res, error, "Failed to communicate with Neural Link.");
   }
