@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Search, Bookmark, Command, Sparkles, ArrowUp, BarChart3 } from 'lucide-react';
 import { NewsGrid, trackClick } from './NewsGrid';
-import { CustomCursor } from './CustomCursor';
 import { CommandPalette } from './CommandPalette';
 import { StatsPanel } from './StatsPanel';
 import AskBar from './AskBar';
@@ -164,7 +163,6 @@ function App() {
 
   return (
     <>
-      <CustomCursor />
 
       <div className="surreal-bg">
         <div className="blob blob-1" />
