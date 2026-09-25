@@ -11,32 +11,7 @@ body {
   color: #ffffff;
   margin: 0;
   font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
-  cursor: none; /* Hide default cursor for custom cursor */
   overflow-x: hidden;
-}
-
-/* Custom Artistic Cursor */
-.custom-cursor {
-  position: fixed;
-  top: 0;
-  left: 0;
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  background: white;
-  mix-blend-mode: difference;
-  pointer-events: none;
-  z-index: 9999;
-  transform: translate(-50%, -50%);
-  transition: width 0.2s, height 0.2s, background-color 0.2s;
-}
-
-.custom-cursor.hovering {
-  width: 60px;
-  height: 60px;
-  background: rgba(230, 0, 51, 0.8);
-  mix-blend-mode: screen;
-  filter: blur(4px);
 }
 
 /* Surreal CSS Background Blobs (Three.js WebGL feel without canvas overhead) */
