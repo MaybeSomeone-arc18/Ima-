@@ -24,7 +24,7 @@ async function groqText(messages, json) {
       body: JSON.stringify({
         model: GROQ_MODEL,
         messages: messages.map(({ role, content }) => ({ role, content: String(content).slice(0, MAX_GROQ_CONTEXT_CHARS) })),
-        max_completion_tokens: json ? 900 : 600,
+        max_completion_tokens: json ? 900 : 1100,
         ...(jsonMode ? { response_format: { type: 'json_object' } } : {})
       }),
       signal: controller.signal
