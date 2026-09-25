@@ -140,20 +140,25 @@ export async function getArticlesByIds(ids) {
 // substitute for the pgvector benchmark when embeddings are available.
 export async function searchArticlesByTitle(question, limit = 5) {
   if (!dbEnabled) return [];
+  const stopwords = new Set(['what', 'which', 'about', 'from', 'recent', 'news', 'tell', 'latest', 'technology', 'there', 'could', 'would', 'have', 'with', 'this', 'that', 'today', 'please', 'cite', 'source', 'announce', 'announced', 'ima']);
   const words = [...new Set((question.toLowerCase().match(/[a-z0-9]{4,}/g) || [])
-    .filter((word) => !['what', 'which', 'about', 'from', 'recent', 'news', 'tell', 'latest', 'technology', 'there', 'could', 'would', 'have', 'with', 'this', 'that'].includes(word)))].slice(0, 4);
-  const find = async (term) => {
-    const query = supabase.from('articles').select('id,title,url,source,text,pub_date')
+    .filter((word) => !stopwords.has(word) && !/^20\d\d$/.test(word)))].slice(0, 5);
+  const find = async (terms) => {
+    let query = supabase.from('articles').select('id,title,url,source,text,pub_date')
       .order('pub_date', { ascending: false }).limit(limit);
-    const { data, error } = await (term ? query.ilike('title', `%${term}%`) : query);
+    for (const term of terms) query = query.ilike('title', `%${term}%`);
+    const { data, error } = await query;
     if (error) throw error;
     return data || [];
   };
-  for (const word of words) {
-    const rows = await find(word);
+  // Prefer a more specific conjunction, then the last distinct term (usually
+  // the event/product), before a broad company name and finally newest items.
+  const searches = words.length > 1 ? [words.slice(0, 2), ...words.slice().reverse().map((word) => [word])] : words.map((word) => [word]);
+  for (const terms of searches) {
+    const rows = await find(terms);
     if (rows.length) return rows.map((row) => ({ id: row.id, text: row.text || row.title, score: 0.5 }));
   }
-  return (await find()).map((row) => ({ id: row.id, text: row.text || row.title, score: 0.1 }));
+  return (await find([])).map((row) => ({ id: row.id, text: row.text || row.title, score: 0.1 }));
 }
 
 // `embedding` is a pgvector column, not jsonb - sent as a bracketed string
