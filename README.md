@@ -28,7 +28,6 @@ ima-dashboard/
 ├── src/                       # React frontend (Vite)
 │   ├── App.jsx                # Layout, header, search/filter state, keyboard shortcuts
 │   ├── NewsGrid.jsx            # Masonry card grid, per-card summary + read-aloud + bookmark
-│   ├── ChatBot.jsx             # Floating AI chat widget
 │   ├── AskBar.jsx              # Floating "Ask IMA" bar - typed Q&A (Indexed/Naive toggle)
 │   ├── LatencyHUD.jsx          # Retrieval-latency HUD, shared by both AskBar retrieval modes
 │   ├── CommandPalette.jsx      # Cmd/Ctrl+K quick search overlay
