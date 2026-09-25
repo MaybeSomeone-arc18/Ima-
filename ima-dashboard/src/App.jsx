@@ -4,7 +4,6 @@ import { NewsGrid, trackClick } from './NewsGrid';
 import { CustomCursor } from './CustomCursor';
 import { CommandPalette } from './CommandPalette';
 import { StatsPanel } from './StatsPanel';
-import ChatBot from './ChatBot';
 import AskBar from './AskBar';
 import { useLiveFeed } from './hooks/useLiveFeed';
 import { useBookmarks } from './hooks/useBookmarks';
@@ -55,7 +54,7 @@ function App() {
   // Global Cmd/Ctrl+K to open the command palette, Escape to close it, plus
   // HN-style single-key navigation (j/k/Enter/s) for anyone who'd rather not
   // touch the mouse. Single-key shortcuts bail out while any text input has
-  // focus (search box, chatbot, palette) so they don't hijack typing.
+  // focus (search box, Ask IMA, palette) so they don't hijack typing.
   useEffect(() => {
     function handleKeyDown(e) {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
@@ -343,7 +342,6 @@ function App() {
 
       <StatsPanel isOpen={isStatsOpen} onClose={() => setIsStatsOpen(false)} />
 
-      <ChatBot />
       <AskBar />
     </>
   );
