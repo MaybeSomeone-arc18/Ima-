@@ -1,14 +1,16 @@
 # 今 IMA — Live Neural Feed
 
-A dark, glassmorphic news dashboard that aggregates Hacker News, TechCrunch, Stratechery, the GitHub Changelog, The Verge, Ars Technica, and WIRED into one live feed, with a Gemini-powered chat assistant, per-article AI summaries, and a multi-hop Q&A "Ask" bar that benchmarks pgvector-indexed semantic search against a DIY baseline in real time.
+A dark, glassmorphic news dashboard that aggregates Hacker News, TechCrunch, Stratechery, the GitHub Changelog, The Verge, Ars Technica, and WIRED into one live feed, with one Ask IMA entry point for cited answers and a side-by-side pgvector vs. naive retrieval comparison. Text generation uses Groq with Gemini fallback; embeddings stay on Gemini.
 
+
+[Open the live dashboard](https://ima-tech.vercel.app/)
 
 ## Features
 
 - **Live aggregated feed** — pulls and normalizes 7 RSS/Atom feeds every 5 minutes, deduplicated by content hash
 - **Persisted to Supabase** — every ingestion cycle upserts into Postgres, and the feed loads from there on startup, so a Render restart or redeploy serves data immediately instead of waiting on a fresh scrape (optional — falls back to in-memory-only if unconfigured)
 - **Real cover images** — most source feeds don't embed images, so the backend scrapes each article's `og:image` as a fallback and caches the result
-- **AI chat assistant** — ask questions about current headlines, answered by Google's Gemini API with the live feed as context
+- **AI answers** — Ask IMA is the one visible assistant entry point. It uses Groq for text generation with Gemini fallback; retrieval embeddings remain on Gemini
 - **Ask IMA — indexed vs. naive retrieval, side by side** — a floating "Ask" bar (`⚡`, bottom-left) answers multi-hop questions over the full article history, grounded with inline citations. Toggle between two retrieval backends for the same question: **Indexed** (Supabase's pgvector extension, HNSW-indexed nearest-neighbor search) and **Naive** (a DIY Postgres + app-side cosine-similarity linear scan) — both embed with Gemini and share the same sub-query planning and answer synthesis, so retrieval mechanism is the only variable. A live latency HUD shows retrieval time hop-by-hop for whichever mode(s) you've run
 - **AI summaries + categories** — a per-card "summarize" button that gets a short Gemini-generated summary (plus a category, from the same call) in a flyout. The top 5 stories are auto-summarized in the background as they enter the feed; every summary is cached in Supabase by article id so it's generated once, ever, across every visitor. Category chips only list categories that actually exist among summarized articles, since classifying all ~150 up front isn't affordable on the free tier — the list grows as more get summarized
 - **Read aloud** — every card and every AI summary can be read aloud via the browser's built-in text-to-speech (Web Speech API)
