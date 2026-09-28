@@ -9,7 +9,8 @@
     "lint": "oxlint",
     "preview": "vite preview",
     "start": "node server/index.js",
-    "test": "node --test server/*.test.js"
+    "test": "node --test server/*.test.js",
+    "benchmark:retrieval": "node benchmarks/retrieval.mjs"
   },
   "dependencies": {
     "@google/genai": "^2.21.0",
