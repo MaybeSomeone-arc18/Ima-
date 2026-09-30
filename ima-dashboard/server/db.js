@@ -46,7 +46,7 @@ export async function loadArticlesFromDb() {
   for (let from = 0; ; from += PAGE_SIZE) {
     const { data, error } = await supabase
       .from('articles')
-      .select('*')
+      .select('id,title,url,image_url,text,source,category,importance_score,pub_date,summary,click_count')
       .order('pub_date', { ascending: false })
       .range(from, from + PAGE_SIZE - 1);
 
