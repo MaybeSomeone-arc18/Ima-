@@ -291,6 +291,8 @@ export function NewsGrid({ feed, isBookmarked, onToggleBookmark, emptyMessage = 
   const [openSummaryId, setOpenSummaryId] = useState(null);
   const [summaries, setSummaries] = useState({});
   const cardRefs = useRef({});
+  const [renderCount, setRenderCount] = useState(36);
+  const moreCardsRef = useRef(null);
 
   // Keyboard nav (see App.jsx's j/k handler) drives focus by id rather than
   // DOM order, since this grid's own clusterPrimaryId filtering can differ
@@ -300,7 +302,7 @@ export function NewsGrid({ feed, isBookmarked, onToggleBookmark, emptyMessage = 
     if (focusedId && cardRefs.current[focusedId]) {
       cardRefs.current[focusedId].scrollIntoView({ behavior: 'smooth', block: 'center' });
     }
-  }, [focusedId]);
+  }, [focusedId, renderCount]);
 
   // Stop any speech in progress if the component unmounts (e.g. hot reload, navigation)
   useEffect(() => {
@@ -374,6 +376,31 @@ export function NewsGrid({ feed, isBookmarked, onToggleBookmark, emptyMessage = 
   // 3-4 times across the grid.
   const visibleFeed = feed.filter((item) => !item.clusterPrimaryId);
 
+  // Mount the first screen promptly. Older stories stay in the full feed for
+  // search/filters and mount as the visitor scrolls, without a new API call.
+  useEffect(() => {
+    const sentinel = moreCardsRef.current;
+    if (!sentinel || renderCount >= visibleFeed.length) return;
+    if (!('IntersectionObserver' in window)) {
+      setRenderCount(visibleFeed.length);
+      return;
+    }
+    const observer = new IntersectionObserver(entries => {
+      if (entries.some(entry => entry.isIntersecting)) {
+        setRenderCount(count => count + 36);
+      }
+    }, { rootMargin: '1000px' });
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [renderCount, visibleFeed.length]);
+
+  // Keyboard navigation can jump beyond the currently mounted cards.
+  useEffect(() => {
+    if (!focusedId) return;
+    const index = visibleFeed.findIndex(item => item.id === focusedId);
+    if (index >= renderCount) setRenderCount(index + 36);
+  }, [focusedId, feed, renderCount]);
+
   if (!visibleFeed || visibleFeed.length === 0) {
     return (
       <div className="flex justify-center items-center h-[50vh]">
@@ -385,8 +412,9 @@ export function NewsGrid({ feed, isBookmarked, onToggleBookmark, emptyMessage = 
   }
 
   return (
+    <>
     <div className="masonry-grid px-6 max-w-7xl mx-auto pb-24">
-      {visibleFeed.map((item, index) => (
+      {visibleFeed.slice(0, renderCount).map((item, index) => (
         <NewsCard
           key={item.id}
           item={item}
@@ -405,5 +433,7 @@ export function NewsGrid({ feed, isBookmarked, onToggleBookmark, emptyMessage = 
         />
       ))}
     </div>
+    {renderCount < visibleFeed.length && <div ref={moreCardsRef} aria-hidden="true" style={{ height: 1 }} />}
+    </>
   );
 }
