@@ -17,7 +17,7 @@ function matchesQuery(item, query) {
 }
 
 function App() {
-  const { feed, loading, error } = useLiveFeed();
+  const { feed, loading, error, status } = useLiveFeed();
   const { bookmarks, isBookmarked, toggleBookmark } = useBookmarks();
 
   const [searchQuery, setSearchQuery] = useState('');
@@ -231,9 +231,9 @@ function App() {
               </button>
 
               <div className="flex items-center space-x-2 opacity-70">
-                <div className={`w-1.5 h-1.5 rounded-full ${loading ? 'bg-white/60 animate-pulse' : 'bg-emerald-400'} shadow-[0_0_10px_currentColor]`} />
+                <div className={`w-1.5 h-1.5 rounded-full ${status !== 'Connected' ? 'bg-white/60 animate-pulse' : 'bg-emerald-400'} shadow-[0_0_10px_currentColor]`} />
                 <span className="font-mono text-[10px] tracking-widest uppercase">
-                  {loading ? 'Synchronizing' : 'Connected'}
+                  {status}
                 </span>
               </div>
             </div>
