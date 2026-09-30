@@ -1,4 +1,5 @@
 import express from 'express';
+import { createFeedResponder } from './feedResponse.js';
 import cors from 'cors';
 import { fetchAndNormalizeFeeds } from './ingestion.js';
 import { clusterArticles } from './clustering.js';
@@ -220,7 +221,7 @@ async function updateFeed() {
     rawStories.sort((a, b) => new Date(b.pubDate).getTime() - new Date(a.pubDate).getTime());
 
     // Update the in-memory feed
-    currentFeed = rawStories;
+    if (rawStories.length > 0) currentFeed = rawStories;
     console.log(`Feed update complete. Current feed size: ${currentFeed.length}`);
 
     await upsertArticles(currentFeed);
@@ -277,9 +278,7 @@ function sendGeminiError(res, error, fallbackMessage) {
   res.status(500).json({ error: fallbackMessage });
 }
 
-app.get('/api/feed', (req, res) => {
-  res.json(currentFeed);
-});
+app.get('/api/feed', createFeedResponder(() => currentFeed));
 
 // Pure aggregation over whatever's already in currentFeed - no extra DB
 // round-trip and no AI cost, so this is safe to poll freely from the UI.
