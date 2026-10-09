@@ -437,7 +437,10 @@ app.listen(PORT, async () => {
   // Serve whatever was last persisted immediately, so a cold start (a
   // Render restart, a redeploy) doesn't leave the feed empty for however
   // long the first fresh scrape takes.
-  const persisted = await loadArticlesFromDb();
+  const persisted = await loadArticlesFromDb((page) => {
+    // Publish a usable feed immediately, not after every history page loads.
+    if (!currentFeed.length) currentFeed = page;
+  });
   if (persisted.length > 0) {
     currentFeed = persisted;
     clusterArticles(currentFeed);

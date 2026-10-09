@@ -39,12 +39,16 @@ const PAGE_SIZE = 1000;
 // Paginated because Supabase/PostgREST caps a single select at 1000 rows by
 // default - without this the feed silently truncated to the newest 1000 of
 // what's actually a 3000+ row table.
-export async function loadArticlesFromDb() {
+export async function loadArticlesFromDb(onPage) {
   if (!dbEnabled) return [];
 
+  return loadArticlePages(supabase, onPage);
+}
+
+export async function loadArticlePages(client, onPage) {
   const rows = [];
   for (let from = 0; ; from += PAGE_SIZE) {
-    const { data, error } = await supabase
+    const { data, error } = await client
       .from('articles')
       .select('id,title,url,image_url,text,source,category,importance_score,pub_date,summary,click_count')
       .order('pub_date', { ascending: false })
@@ -56,6 +60,8 @@ export async function loadArticlesFromDb() {
     }
 
     rows.push(...data);
+    // Let startup serve the newest page while older history keeps loading.
+    if (onPage) onPage(rows.map(rowToArticle));
     if (data.length < PAGE_SIZE) break;
   }
 
